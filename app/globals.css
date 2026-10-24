@@ -1,8 +1,13 @@
 @import "tailwindcss";
 
+@custom-variant dark (&:where(.dark, .dark *));
+
 :root {
   --background: #F8FAFC;
   --foreground: #1E293B;
+  --surface: #FFFFFF;
+  --surface-muted: #F1F5F9;
+  --border-color: #E2E8F0;
   --text-secondary: #475569;
   --primary-indigo: #4F46E5;
   --indigo-soft-bg: #EEF2FF;
@@ -19,12 +24,17 @@
   --alert-red: #EF4444;
   --red-soft-bg: #FEE2E2;
   --red-soft-text: #991B1B;
+  color-scheme: light;
 }
 
 .dark {
   --background: #0F172A;
   --foreground: #F1F5F9;
+  --surface: #1E293B;
+  --surface-muted: #0F172A;
+  --border-color: #334155;
   --text-secondary: #94A3B8;
+  color-scheme: dark;
 }
 
 @theme inline {
@@ -35,7 +45,8 @@
 }
 
 body {
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
   font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  transition: background-color 0.2s ease, color 0.2s ease;
 }

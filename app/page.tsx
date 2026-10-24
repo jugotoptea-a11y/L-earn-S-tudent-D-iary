@@ -13,18 +13,21 @@ type ContentCategory =
   | "Notas"
   | "Información general";
 
+interface SyllabusSection {
+  id: string;
+  section: string;
+  title: string;
+  snippet: string;
+  fileType?: "PDF" | "CSV" | "TXT" | "MD" | "JSON" | "SYLLABUS";
+}
+
 interface SubjectConfig {
   id: string;
   name: string;
   accentHex: string;
   teacherName: string;
   code: string;
-  syllabusSections: {
-    id: string;
-    section: string;
-    title: string;
-    snippet: string;
-  }[];
+  syllabusSections: SyllabusSection[];
   deadlines: {
     id: string;
     title: string;
@@ -52,6 +55,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Temario del Segundo Parcial",
         snippet:
           "El segundo parcial evalúa técnicas de integración (por partes, fracciones parciales), integrales impropias y aplicaciones de la integral definida (áreas y volúmenes de revolución).",
+        fileType: "SYLLABUS",
       },
       {
         id: "syl-2",
@@ -59,6 +63,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Calendario de Evaluaciones y Ponderación",
         snippet:
           "Primer parcial: 25% · Segundo parcial: 25% (viernes 14 de noviembre, 10:00 a.m., Aula Magna) · Talleres prácticos (4 entregas): 20% · Examen final acumulativo: 30%.",
+        fileType: "SYLLABUS",
       },
       {
         id: "syl-3",
@@ -66,6 +71,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Entrega de Talleres",
         snippet:
           "Todos los talleres se entregan en formato PDF a través de la plataforma del curso antes de las 23:59 del día indicado. El Taller 3 vence este viernes.",
+        fileType: "SYLLABUS",
       },
     ],
     deadlines: [
@@ -105,6 +111,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Criterios de Calificación y Laboratorio",
         snippet:
           "Parciales teóricos: 50% · Informes de laboratorio quincenales: 30% · Proyecto experimental final: 20%. Es requisito aprobar el componente práctico.",
+        fileType: "SYLLABUS",
       },
       {
         id: "fis-2",
@@ -112,6 +119,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Próximo Examen de Cinemática y Dinámica",
         snippet:
           "El examen abarca leyes de Newton, rozamiento, trabajo y conservación de la energía mecánica. Se permite formulario de una carilla escrito a mano.",
+        fileType: "SYLLABUS",
       },
     ],
     deadlines: [
@@ -145,6 +153,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Evaluación Continua y Entregas en Git",
         snippet:
           "Laboratorios semanales automatizados: 35% · Parcial práctico en sala: 30% · Proyecto final en equipo: 35%. Todas las entregas deben compilar sin errores.",
+        fileType: "SYLLABUS",
       },
       {
         id: "prg-2",
@@ -152,6 +161,7 @@ const SUBJECTS: SubjectConfig[] = [
         title: "Contenido del Parcial Práctico",
         snippet:
           "Recursividad, estructuras de datos lineales (listas enlazadas, pilas y colas) y análisis básico de complejidad algorítmica O(n).",
+        fileType: "SYLLABUS",
       },
     ],
     deadlines: [
@@ -168,7 +178,7 @@ const SUBJECTS: SubjectConfig[] = [
       },
     ],
     materials: [
-      { id: "pm-1", title: " Casos de prueba públicos — Taller Recursión", type: "JSON" },
+      { id: "pm-1", title: "Casos de prueba públicos — Taller Recursión", type: "JSON" },
       { id: "pm-2", title: "Guía de estilo y buenas prácticas", type: "MD" },
     ],
   },
@@ -266,6 +276,20 @@ interface ChatMessage {
   emailError?: string;
 }
 
+interface FileAnalysisReport {
+  usedGemma: boolean;
+  modelName: string;
+  summary: string;
+  keyFindings: string[];
+  suggestedQuestions: string[];
+  perFileHighlights: {
+    fileName: string;
+    fileType: string;
+    charCount: number;
+    preview: string;
+  }[];
+}
+
 const INITIAL_MOCKUP_TICKETS: GroupedTicket[] = [
   {
     id: "mock-ticket-1",
@@ -318,6 +342,7 @@ export default function HomePage() {
   const [appView, setAppView] = useState<AppView>("profesor");
   const [profesorNav, setProfesorNav] = useState<ProfesorNav>("bandeja");
   const [darkMode, setDarkMode] = useState(false);
+
   const seqRef = useRef(1);
   function makeId(prefix: string) {
     seqRef.current += 1;
@@ -332,6 +357,23 @@ export default function HomePage() {
       SUBJECTS.find((s) => s.id === selectedSubjectId) || SUBJECTS[0],
     [selectedSubjectId]
   );
+
+  // Uploaded & AI-analyzed documents per subject (supports multiple PDFs, CSVs, TXTs)
+  const [uploadedSectionsBySubject, setUploadedSectionsBySubject] = useState<
+    Record<string, SyllabusSection[]>
+  >({
+    "calculo-ii": [],
+    "fisica-i": [],
+    programacion: [],
+  });
+
+  // Multi-file queue & AI analysis state
+  const [queuedFiles, setQueuedFiles] = useState<File[]>([]);
+  const [customAiPrompt, setCustomAiPrompt] = useState("");
+  const [analyzingFiles, setAnalyzingFiles] = useState(false);
+  const [aiAnalysisReport, setAiAnalysisReport] =
+    useState<FileAnalysisReport | null>(null);
+  const [fileUploadError, setFileUploadError] = useState("");
 
   // Database state from Neon Postgres
   const [teachers, setTeachers] = useState<Teacher[]>([]);
@@ -350,7 +392,7 @@ export default function HomePage() {
   const [replyFeedbackMsg, setReplyFeedbackMsg] = useState<string>("");
   const [sendingReply, setSendingReply] = useState<boolean>(false);
 
-  // Docente Login & Content Upload state (Base de conocimiento)
+  // Docente Login & Manual Fragment Upload state
   const [docenteEmail, setDocenteEmail] = useState("");
   const [docenteName, setDocenteName] = useState("");
   const [docenteCourse, setDocenteCourse] = useState("");
@@ -359,7 +401,9 @@ export default function HomePage() {
   const [docenteMsg, setDocenteMsg] = useState("");
   const [copiedCode, setCopiedCode] = useState(false);
 
-  const [category, setCategory] = useState<ContentCategory>("Información general");
+  const [category, setCategory] = useState<ContentCategory>(
+    "Información general"
+  );
   const [contentTitle, setContentTitle] = useState("");
   const [contentBody, setContentBody] = useState("");
   const [savingContent, setSavingContent] = useState(false);
@@ -426,6 +470,12 @@ export default function HomePage() {
       root.classList.remove("dark");
     }
   }, [darkMode]);
+
+  // Combined syllabus + uploaded PDF/CSV/TXT sections for the active subject
+  const activeSubjectSections = useMemo(() => {
+    const uploaded = uploadedSectionsBySubject[selectedSubjectId] || [];
+    return [...uploaded, ...currentSubject.syllabusSections];
+  }, [uploadedSectionsBySubject, selectedSubjectId, currentSubject]);
 
   async function fetchAllData(currentTeacherEmail?: string) {
     setLoadingData(true);
@@ -588,7 +638,6 @@ export default function HomePage() {
     const cleanReply = replyText.trim();
 
     try {
-      // If connected to real DB escalations or logged in teacher, persist in Neon Postgres
       if (selectedTicket.escalationIds.length > 0 || loggedTeacher) {
         await fetch("/api/teachers", {
           method: "PUT",
@@ -604,7 +653,6 @@ export default function HomePage() {
         await fetchAllData(loggedTeacher?.email);
       }
 
-      // Update local ticket state
       setLocalTickets((prev) =>
         prev.map((item) =>
           item.id === selectedTicket.id
@@ -622,7 +670,23 @@ export default function HomePage() {
         )
       );
 
-      // Update student ticket timeline & inject Professor's Amber reply in Student Chat!
+      if (addToKbChecked) {
+        const kbSecId = makeId("kb-ans");
+        setUploadedSectionsBySubject((prev) => ({
+          ...prev,
+          [selectedSubjectId]: [
+            {
+              id: kbSecId,
+              section: "Base de conocimiento · Respuesta del profesor",
+              title: selectedTicket.question,
+              snippet: cleanReply,
+              fileType: "SYLLABUS",
+            },
+            ...(prev[selectedSubjectId] || []),
+          ],
+        }));
+      }
+
       setStudentTickets((prev) =>
         prev.map((st) =>
           st.question.toLowerCase().trim() ===
@@ -713,45 +777,140 @@ export default function HomePage() {
     }
   }
 
-  async function handleUploadFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const text = await file.text();
-    if (!contentTitle) {
-      setContentTitle(file.name.replace(/\.[^/.]+$/, ""));
-    }
-    setContentBody((prev) => (prev ? `${prev}\n\n${text}` : text));
+  // --- MULTI-FILE UPLOAD (.pdf, .txt, .csv, .md, .json) & AI ANALYSIS ---
+  function handleSelectMultipleFiles(e: React.ChangeEvent<HTMLInputElement>) {
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    const incoming = Array.from(fileList);
+    setQueuedFiles((prev) => [...prev, ...incoming]);
+    setFileUploadError("");
+    e.target.value = "";
   }
 
-  async function handleAddContent(e: React.FormEvent) {
+  function handleRemoveQueuedFile(indexToRemove: number) {
+    setQueuedFiles((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+  }
+
+  async function handleAnalyzeFilesWithAI(e: React.FormEvent) {
     e.preventDefault();
-    if (!loggedTeacher) return;
-    setSavingContent(true);
-    setDocenteMsg("");
+    if (queuedFiles.length === 0) {
+      setFileUploadError(
+        "Selecciona al menos un archivo PDF, TXT o CSV para analizar."
+      );
+      return;
+    }
+
+    setAnalyzingFiles(true);
+    setFileUploadError("");
+
     try {
-      const res = await fetch("/api/contents", {
+      const formData = new FormData();
+      for (const file of queuedFiles) {
+        formData.append("files", file);
+      }
+      formData.append(
+        "courseName",
+        loggedTeacher?.course || currentSubject.name
+      );
+      formData.append("category", category);
+      if (loggedTeacher?.id) {
+        formData.append("teacherId", loggedTeacher.id);
+      }
+      if (customAiPrompt.trim()) {
+        formData.append("customPrompt", customAiPrompt.trim());
+      }
+
+      const res = await fetch("/api/analyze-files", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          teacherId: loggedTeacher.id,
-          category,
-          title: contentTitle,
-          content: contentBody,
-        }),
+        body: formData,
       });
       const data = await res.json();
+
       if (!res.ok) {
-        setDocenteMsg(data.error || "No se pudo guardar el contenido.");
-      } else {
-        setContentTitle("");
-        setContentBody("");
-        setDocenteMsg(
-          "Material guardado en la base de conocimiento (Neon Postgres) para Gemma 4."
+        setFileUploadError(
+          data.error || "No se pudieron analizar los archivos."
         );
+        return;
+      }
+
+      const newSections: SyllabusSection[] = (data.files || []).map(
+        (f: {
+          fileName: string;
+          fileType: SyllabusSection["fileType"];
+          extractedText: string;
+        }) => ({
+          id: makeId("file"),
+          section: `Archivo ${f.fileType} · ${f.fileName}`,
+          title: f.fileName,
+          snippet: f.extractedText,
+          fileType: f.fileType,
+        })
+      );
+
+      setUploadedSectionsBySubject((prev) => ({
+        ...prev,
+        [selectedSubjectId]: [
+          ...newSections,
+          ...(prev[selectedSubjectId] || []),
+        ],
+      }));
+
+      setAiAnalysisReport(data.analysis || null);
+      setQueuedFiles([]);
+      if (loggedTeacher?.email) {
         await fetchAllData(loggedTeacher.email);
       }
     } catch {
-      setDocenteMsg("Error guardando contenido.");
+      setFileUploadError("Error de red al enviar los archivos al analizador IA.");
+    } finally {
+      setAnalyzingFiles(false);
+    }
+  }
+
+  async function handleAddManualContent(e: React.FormEvent) {
+    e.preventDefault();
+    if (!contentTitle.trim() || !contentBody.trim()) return;
+    setSavingContent(true);
+    setDocenteMsg("");
+
+    try {
+      // Always add to active subject's knowledge base immediately
+      const newSec: SyllabusSection = {
+        id: makeId("manual"),
+        section: `${category} · ${contentTitle.trim()}`,
+        title: contentTitle.trim(),
+        snippet: contentBody.trim(),
+        fileType: "SYLLABUS",
+      };
+
+      setUploadedSectionsBySubject((prev) => ({
+        ...prev,
+        [selectedSubjectId]: [newSec, ...(prev[selectedSubjectId] || [])],
+      }));
+
+      if (loggedTeacher && loggedTeacher.status === "approved") {
+        const res = await fetch("/api/contents", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            teacherId: loggedTeacher.id,
+            category,
+            title: contentTitle,
+            content: contentBody,
+          }),
+        });
+        if (res.ok) {
+          await fetchAllData(loggedTeacher.email);
+        }
+      }
+
+      setContentTitle("");
+      setContentBody("");
+      setDocenteMsg(
+        "Fragmento incorporado a la base de conocimiento y disponible para el análisis de la IA."
+      );
+    } catch {
+      setDocenteMsg("Error guardando el fragmento.");
     } finally {
       setSavingContent(false);
     }
@@ -764,6 +923,15 @@ export default function HomePage() {
       { method: "DELETE" }
     );
     await fetchAllData(loggedTeacher.email);
+  }
+
+  function handleDeleteUploadedSection(secId: string) {
+    setUploadedSectionsBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: (prev[selectedSubjectId] || []).filter(
+        (s) => s.id !== secId
+      ),
+    }));
   }
 
   function handleCopyTeacherCode(code: string) {
@@ -804,85 +972,6 @@ export default function HomePage() {
     }
   }
 
-  function findLocalSyllabusAnswer(q: string): {
-    known: boolean;
-    answer: string;
-    sourceLabel?: string;
-    sourceSnippet?: string;
-    confidence?: "Basada en el syllabus" | "Respuesta inferida";
-  } {
-    const norm = q
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
-
-    // Check resolved tickets in knowledge base first
-    const resolvedMatch = combinedTickets.find(
-      (t) =>
-        t.status === "resolved" &&
-        t.addedToKb &&
-        t.teacherAnswer &&
-        norm.includes("calculadora") &&
-        t.question.toLowerCase().includes("calculadora")
-    );
-    if (resolvedMatch && resolvedMatch.teacherAnswer) {
-      return {
-        known: true,
-        answer: resolvedMatch.teacherAnswer,
-        sourceLabel: "Base de conocimiento · Respuesta del profesor",
-        sourceSnippet: resolvedMatch.teacherAnswer,
-        confidence: "Basada en el syllabus",
-      };
-    }
-
-    if (norm.includes("taller 3") || norm.includes("entrega")) {
-      const sec =
-        currentSubject.syllabusSections[2] || currentSubject.syllabusSections[0];
-      return {
-        known: true,
-        answer:
-          "El Taller 3 se entrega en formato PDF a través de la plataforma del curso antes del viernes a las 23:59.",
-        sourceLabel: sec.section,
-        sourceSnippet: sec.snippet,
-        confidence: "Basada en el syllabus",
-      };
-    }
-
-    if (
-      norm.includes("cuando") ||
-      norm.includes("parcial") ||
-      norm.includes("fecha") ||
-      norm.includes("califica") ||
-      norm.includes("porcentaje")
-    ) {
-      if (norm.includes("calculadora")) {
-        return { known: false, answer: "NO_SE" };
-      }
-      const sec =
-        currentSubject.syllabusSections[1] || currentSubject.syllabusSections[0];
-      return {
-        known: true,
-        answer: sec.snippet,
-        sourceLabel: sec.section,
-        sourceSnippet: sec.snippet,
-        confidence: "Basada en el syllabus",
-      };
-    }
-
-    if (norm.includes("entra") || norm.includes("temario") || norm.includes("tema")) {
-      const sec = currentSubject.syllabusSections[0];
-      return {
-        known: true,
-        answer: sec.snippet,
-        sourceLabel: sec.section,
-        sourceSnippet: sec.snippet,
-        confidence: "Basada en el syllabus",
-      };
-    }
-
-    return { known: false, answer: "NO_SE" };
-  }
-
   async function askQuestionInChat(rawQuestion: string) {
     const currentQ = rawQuestion.trim();
     if (!currentQ) return;
@@ -901,90 +990,78 @@ export default function HomePage() {
     setAskingGemma(true);
 
     try {
-      if (connectedTeacher) {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accessCode: connectedTeacher.accessCode,
-            studentName,
-            studentEmail,
-            question: currentQ,
-            deferEscalation: true,
-          }),
-        });
-        const data = await res.json();
+      // Build extraContents from activeSubjectSections (including uploaded PDFs, CSVs, TXTs!)
+      const extraContentsPayload = activeSubjectSections.map((sec) => ({
+        id: sec.id,
+        category: "Información general",
+        title: sec.section,
+        content: `${sec.title}\n${sec.snippet}`,
+      }));
 
-        if (res.ok && data.answered) {
-          const botMsg: ChatMessage = {
-            id: makeId("b"),
-            sender: "bot",
-            text: data.answer,
-            answered: true,
-            sourceLabel: data.source
-              ? `${data.source.category} · ${data.source.title}`
-              : "Syllabus · Material del curso",
-            sourceSnippet: data.source?.snippet,
-            confidence: data.confidence || "Basada en el syllabus",
-          };
-          setChatBySubject((prev) => ({
-            ...prev,
-            [selectedSubjectId]: [...(prev[selectedSubjectId] || []), botMsg],
-          }));
-          return;
-        }
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accessCode: connectedTeacher?.accessCode || "",
+          courseName: connectedTeacher?.course || currentSubject.name,
+          studentName,
+          studentEmail,
+          question: currentQ,
+          deferEscalation: true,
+          extraContents: extraContentsPayload,
+        }),
+      });
+      const data = await res.json();
 
-        // Honest message + editable ticket draft (STYLES.md §1)
-        const draftMsg: ChatMessage = {
-          id: makeId("draft"),
-          sender: "bot",
-          text: "No encuentro esto en el material del curso.",
-          answered: false,
-          isTicketDraft: true,
-          draftQuestion: currentQ,
-          draftContext:
-            data.draftContext ||
-            `Asignatura: ${connectedTeacher.course} · Consultado por ${studentName} en el chat.`,
-        };
-        setChatBySubject((prev) => ({
-          ...prev,
-          [selectedSubjectId]: [...(prev[selectedSubjectId] || []), draftMsg],
-        }));
-        return;
-      }
-
-      // Demo / Local syllabus lookup when no Neon code is connected yet
-      await new Promise((r) => setTimeout(r, 450));
-      const localRes = findLocalSyllabusAnswer(currentQ);
-      if (localRes.known) {
+      if (res.ok && data.answered) {
         const botMsg: ChatMessage = {
           id: makeId("b"),
           sender: "bot",
-          text: localRes.answer,
+          text: data.answer,
           answered: true,
-          sourceLabel: localRes.sourceLabel,
-          sourceSnippet: localRes.sourceSnippet,
-          confidence: localRes.confidence,
+          sourceLabel: data.source?.title || "Syllabus · Material del curso",
+          sourceSnippet: data.source?.snippet,
+          confidence: data.confidence || "Basada en el syllabus",
         };
         setChatBySubject((prev) => ({
           ...prev,
           [selectedSubjectId]: [...(prev[selectedSubjectId] || []), botMsg],
         }));
-      } else {
-        const draftMsg: ChatMessage = {
-          id: makeId("draft"),
-          sender: "bot",
-          text: "No encuentro esto en el material del curso.",
-          answered: false,
-          isTicketDraft: true,
-          draftQuestion: currentQ,
-          draftContext: `Asignatura: ${currentSubject.name} · El estudiante consulta una duda que no figura en las secciones del syllabus cargado.`,
-        };
-        setChatBySubject((prev) => ({
-          ...prev,
-          [selectedSubjectId]: [...(prev[selectedSubjectId] || []), draftMsg],
-        }));
+        return;
       }
+
+      // Honest message + editable ticket draft (STYLES.md §1)
+      const draftMsg: ChatMessage = {
+        id: makeId("draft"),
+        sender: "bot",
+        text: "No encuentro esto en el material del curso.",
+        answered: false,
+        isTicketDraft: true,
+        draftQuestion: currentQ,
+        draftContext:
+          data.draftContext ||
+          `Asignatura: ${
+            connectedTeacher?.course || currentSubject.name
+          } · Consultado por ${studentName} en el chat.`,
+      };
+      setChatBySubject((prev) => ({
+        ...prev,
+        [selectedSubjectId]: [...(prev[selectedSubjectId] || []), draftMsg],
+      }));
+    } catch {
+      const errMsg: ChatMessage = {
+        id: makeId("err"),
+        sender: "bot",
+        text: "No encuentro esto en el material del curso.",
+        answered: false,
+        isTicketDraft: true,
+        draftQuestion: currentQ,
+        draftContext: `Asignatura: ${currentSubject.name}`,
+      };
+      setChatBySubject((prev) => ({
+        ...prev,
+        [selectedSubjectId]: [...(prev[selectedSubjectId] || []), errMsg],
+      }));
     } finally {
       setAskingGemma(false);
     }
@@ -1041,7 +1118,6 @@ export default function HomePage() {
         emailError = "Registrado en la bandeja de tickets del profesor.";
       }
     } else {
-      // Also add to Professor's local Bandeja de tickets so the user can see it live!
       const newTicketId = makeId("local-ticket");
       setLocalTickets((prev) => [
         {
@@ -1112,21 +1188,33 @@ export default function HomePage() {
     ? contents.filter((c) => c.teacherId === loggedTeacher.id)
     : [];
 
+  // Explicit theme classes for guaranteed contrast in both Light and Dark mode
+  const surfaceCard = darkMode
+    ? "bg-[#1E293B] border-[#334155] text-[#F1F5F9]"
+    : "bg-white border-slate-200 text-[#1E293B]";
+  const surfaceSubCard = darkMode
+    ? "bg-[#0F172A] border-[#334155] text-[#F1F5F9]"
+    : "bg-[#F8FAFC] border-slate-200 text-[#1E293B]";
+  const textPrimary = darkMode ? "text-[#F1F5F9]" : "text-[#1E293B]";
+  const textSecondary = darkMode ? "text-[#94A3B8]" : "text-[#475569]";
+  const inputSurface = darkMode
+    ? "bg-[#0F172A] border-[#475569] text-[#F1F5F9] placeholder:text-slate-400"
+    : "bg-white border-slate-300 text-[#1E293B] placeholder:text-slate-400";
+
   return (
     <div
-      className={`min-h-screen flex flex-col md:flex-row ${
+      className={`min-h-screen flex flex-col md:flex-row transition-colors duration-200 ${
         darkMode
           ? "dark bg-[#0F172A] text-[#F1F5F9]"
           : "bg-[#F8FAFC] text-[#1E293B]"
       }`}
     >
       {/* ===================== LEFT SIDEBAR (Matches Reference Image) ===================== */}
-      <aside className="w-full md:w-[270px] shrink-0 bg-[#2A236E] dark:bg-[#15123A] text-white flex flex-col justify-between select-none">
+      <aside className="w-full md:w-[270px] shrink-0 bg-[#2A236E] dark:bg-[#15123A] text-white flex flex-col justify-between select-none border-r border-indigo-950/30">
         <div>
           {/* Brand Logo & Title */}
           <div className="px-6 pt-7 pb-6 flex items-center gap-3.5">
             <div className="w-10 h-10 rounded-xl bg-[#4F46E5] flex items-center justify-center shadow-xs shrink-0">
-              {/* Open book icon */}
               <svg
                 className="w-5 h-5 text-white"
                 fill="none"
@@ -1147,7 +1235,7 @@ export default function HomePage() {
             </span>
           </div>
 
-          {/* Primary Navigation Items (Reference Image) */}
+          {/* Primary Navigation Items */}
           <nav
             aria-label="Navegación principal"
             className="px-3.5 space-y-2 mt-1"
@@ -1158,13 +1246,12 @@ export default function HomePage() {
                 setAppView("profesor");
                 setProfesorNav("bandeja");
               }}
-              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left cursor-pointer ${
                 appView === "profesor" && profesorNav === "bandeja"
                   ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
                   : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
               }`}
             >
-              {/* Tray / Inbox icon */}
               <svg
                 className="w-5 h-5 shrink-0"
                 fill="none"
@@ -1188,13 +1275,12 @@ export default function HomePage() {
                 setAppView("profesor");
                 setProfesorNav("conocimiento");
               }}
-              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left cursor-pointer ${
                 appView === "profesor" && profesorNav === "conocimiento"
                   ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
                   : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
               }`}
             >
-              {/* Bookshelf icon */}
               <svg
                 className="w-5 h-5 shrink-0"
                 fill="none"
@@ -1218,13 +1304,12 @@ export default function HomePage() {
                 setAppView("profesor");
                 setProfesorNav("metricas");
               }}
-              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left cursor-pointer ${
                 appView === "profesor" && profesorNav === "metricas"
                   ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
                   : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
               }`}
             >
-              {/* Metrics / Bar chart icon */}
               <svg
                 className="w-5 h-5 shrink-0"
                 fill="none"
@@ -1244,22 +1329,22 @@ export default function HomePage() {
           </nav>
         </div>
 
-        {/* Bottom Switcher: Vista Estudiante, Admin & Modo Oscuro (STYLES.md) */}
-        <div className="p-4 mt-8 border-t border-white/10 space-y-2">
-          <p className="px-2 text-[11px] font-bold uppercase tracking-wider text-indigo-300/80">
-            Cambiar experiencia
+        {/* Bottom Switcher: Vista Estudiante, Admin & Modo Claro/Oscuro */}
+        <div className="p-4 mt-8 border-t border-white/10 space-y-2.5">
+          <p className="px-2 text-[11px] font-bold uppercase tracking-wider text-indigo-300">
+            Cambiar experiencia y tema
           </p>
           <button
             type="button"
             onClick={() => setAppView("estudiante")}
-            className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center justify-between text-xs font-semibold transition-colors ${
+            className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center justify-between text-xs font-semibold transition-colors cursor-pointer ${
               appView === "estudiante"
-                ? "bg-[#14B8A6] text-slate-950"
+                ? "bg-[#14B8A6] text-slate-950 font-bold"
                 : "bg-white/10 text-indigo-100 hover:bg-white/15"
             }`}
           >
             <span>💬 Chat del estudiante</span>
-            <span className="text-[11px] opacity-80">Vista alumno</span>
+            <span className="text-[11px] opacity-85">Vista alumno</span>
           </button>
 
           <div className="flex gap-2">
@@ -1269,9 +1354,9 @@ export default function HomePage() {
                 setAppView("admin");
                 fetchAllData();
               }}
-              className={`flex-1 min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+              className={`flex-1 min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold transition-colors cursor-pointer ${
                 appView === "admin"
-                  ? "bg-amber-400 text-slate-950"
+                  ? "bg-amber-400 text-slate-950 font-bold"
                   : "bg-white/10 text-indigo-100 hover:bg-white/15"
               }`}
             >
@@ -1281,10 +1366,10 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setDarkMode((d) => !d)}
-              aria-label="Alternar modo oscuro"
-              className="min-h-[44px] px-3 py-2 rounded-xl bg-white/10 text-indigo-100 hover:bg-white/15 text-xs font-semibold transition-colors"
+              aria-label="Alternar modo claro u oscuro"
+              className="flex-1 min-h-[44px] px-3 py-2 rounded-xl bg-white/15 hover:bg-white/25 text-white text-xs font-bold transition-colors cursor-pointer"
             >
-              {darkMode ? "☀️ Claro" : "🌙 Oscuro"}
+              {darkMode ? "☀️ Modo Claro" : "🌙 Modo Oscuro"}
             </button>
           </div>
         </div>
@@ -1300,16 +1385,16 @@ export default function HomePage() {
             {/* Header Row */}
             <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                <h1 className={`text-[28px] leading-tight font-bold ${textPrimary}`}>
                   Bandeja de tickets
                 </h1>
-                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
+                <p className={`text-[14.5px] mt-0.5 ${textSecondary}`}>
                   {loggedTeacher?.course || currentSubject.name} · preguntas que
                   el asistente no pudo resolver
                 </p>
               </div>
 
-              {/* Subject Pill (Right top corner in Reference Image) */}
+              {/* Subject Pill */}
               <div className="flex items-center gap-2">
                 <button
                   type="button"
@@ -1321,50 +1406,59 @@ export default function HomePage() {
                     setSelectedSubjectId(next.id);
                   }}
                   title="Haz clic para cambiar de asignatura"
-                  className="min-h-[44px] rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2 flex items-center gap-2.5 shadow-2xs hover:border-slate-300 transition-colors"
+                  className={`min-h-[44px] rounded-full border px-5 py-2 flex items-center gap-2.5 shadow-2xs transition-colors cursor-pointer ${surfaceCard}`}
                 >
                   <span
                     className="w-2.5 h-2.5 rounded-full shrink-0"
                     style={{ backgroundColor: currentSubject.accentHex }}
                   />
-                  <span className="text-[14px] font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                  <span className={`text-[14px] font-bold ${textPrimary}`}>
                     {loggedTeacher?.course || currentSubject.name}
                   </span>
                 </button>
               </div>
             </header>
 
-            {/* 3 Metric Cards Row (Exact Match to Reference Image) */}
+            {/* 3 Metric Cards Row */}
             <section
               aria-label="Métricas rápidas del curso"
               className="grid grid-cols-1 md:grid-cols-3 gap-5"
             >
-              {/* Card 1: Dudas resueltas por la IA */}
-              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
-                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border px-6 py-5 shadow-2xs ${surfaceCard}`}>
+                <p className={`text-[13.5px] font-bold ${textSecondary}`}>
                   Dudas resueltas por la IA
                 </p>
-                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#115E59] dark:text-[#14B8A6] tracking-tight">
+                <p
+                  className={`mt-1.5 text-[32px] leading-none font-extrabold tracking-tight ${
+                    darkMode ? "text-[#2DD4BF]" : "text-[#115E59]"
+                  }`}
+                >
                   [ 00 % ]
                 </p>
               </div>
 
-              {/* Card 2: Tiempo ahorrado esta semana */}
-              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
-                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border px-6 py-5 shadow-2xs ${surfaceCard}`}>
+                <p className={`text-[13.5px] font-bold ${textSecondary}`}>
                   Tiempo ahorrado esta semana
                 </p>
-                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#3730A3] dark:text-indigo-400 tracking-tight">
+                <p
+                  className={`mt-1.5 text-[32px] leading-none font-extrabold tracking-tight ${
+                    darkMode ? "text-[#818CF8]" : "text-[#3730A3]"
+                  }`}
+                >
                   [ 0 h ]
                 </p>
               </div>
 
-              {/* Card 3: Tema más confuso */}
-              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
-                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border px-6 py-5 shadow-2xs ${surfaceCard}`}>
+                <p className={`text-[13.5px] font-bold ${textSecondary}`}>
                   Tema más confuso
                 </p>
-                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#92400E] dark:text-amber-400 tracking-tight">
+                <p
+                  className={`mt-1.5 text-[32px] leading-none font-extrabold tracking-tight ${
+                    darkMode ? "text-[#FBBF24]" : "text-[#92400E]"
+                  }`}
+                >
                   [ tema ]
                 </p>
               </div>
@@ -1377,7 +1471,7 @@ export default function HomePage() {
                 aria-label="Tickets pendientes agrupados"
                 className="lg:col-span-7 space-y-3.5"
               >
-                <h2 className="text-[12.5px] font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                <h2 className={`text-[12.5px] font-extrabold uppercase tracking-wider ${textSecondary}`}>
                   PENDIENTES, AGRUPADOS POR PREGUNTA SIMILAR
                 </h2>
 
@@ -1389,14 +1483,17 @@ export default function HomePage() {
                         key={ticket.id}
                         type="button"
                         onClick={() => handleSelectTicket(ticket)}
-                        className={`w-full text-left rounded-2xl bg-white dark:bg-slate-900 p-5 transition-all block ${
+                        className={`w-full text-left rounded-2xl p-5 transition-all block cursor-pointer ${
+                          darkMode ? "bg-[#1E293B]" : "bg-white"
+                        } ${
                           isSelected
                             ? "border-2 border-[#4F46E5] shadow-xs"
-                            : "border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                            : darkMode
+                              ? "border border-[#334155] hover:border-slate-500"
+                              : "border border-slate-200 hover:border-slate-300"
                         }`}
                       >
                         <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
-                          {/* Accessible Status Badge: Icon + Text + Family Contrast Colors */}
                           {ticket.status === "urgent" && (
                             <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEE2E2] text-[#991B1B] px-3 py-1 text-xs font-bold">
                               <svg
@@ -1457,12 +1554,12 @@ export default function HomePage() {
                             </span>
                           )}
 
-                          <span className="text-[13px] font-bold text-[#475569] dark:text-slate-400">
+                          <span className={`text-[13px] font-bold ${textSecondary}`}>
                             {ticket.metaLabel}
                           </span>
                         </div>
 
-                        <p className="text-[16.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] leading-snug">
+                        <p className={`text-[16.5px] font-bold leading-snug ${textPrimary}`}>
                           {ticket.question}
                         </p>
                       </button>
@@ -1474,15 +1571,15 @@ export default function HomePage() {
               {/* Right Column: RESPONDER Panel */}
               <section
                 aria-label="Responder al ticket seleccionado"
-                className="lg:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xs"
+                className={`lg:col-span-5 rounded-2xl border p-6 shadow-2xs ${surfaceCard}`}
               >
                 {selectedTicket && (
                   <form onSubmit={handleReplyToStudents} className="space-y-4">
-                    <div className="text-[12.5px] font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                    <div className={`text-[12.5px] font-extrabold uppercase tracking-wider ${textSecondary}`}>
                       RESPONDER
                     </div>
 
-                    <h3 className="text-[17.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] leading-snug">
+                    <h3 className={`text-[17.5px] font-bold leading-snug ${textPrimary}`}>
                       {selectedTicket.question}
                     </h3>
 
@@ -1494,7 +1591,7 @@ export default function HomePage() {
                     <div>
                       <label
                         htmlFor="profesor-respuesta-textarea"
-                        className="block text-[13.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] mb-2"
+                        className={`block text-[13.5px] font-bold mb-2 ${textPrimary}`}
                       >
                         Tu respuesta
                       </label>
@@ -1505,19 +1602,25 @@ export default function HomePage() {
                         placeholder="Escribe aquí la respuesta para los estudiantes..."
                         value={replyText}
                         onChange={(e) => setReplyText(e.target.value)}
-                        className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-4 text-[14px] text-[#1E293B] dark:text-[#F1F5F9] placeholder:text-slate-400 focus:border-[#4F46E5] focus:outline-none resize-y"
+                        className={`w-full rounded-2xl border p-4 text-[14px] focus:border-[#4F46E5] focus:outline-none resize-y ${inputSurface}`}
                       />
                     </div>
 
-                    {/* Checkbox "Añadir a la base de conocimiento" in Soft Indigo (#EEF2FF / #3730A3) */}
-                    <label className="min-h-[48px] rounded-xl bg-[#EEF2FF] dark:bg-indigo-950/70 px-4 py-3 flex items-center gap-3 cursor-pointer select-none">
+                    {/* Checkbox "Añadir a la base de conocimiento" */}
+                    <label
+                      className={`min-h-[48px] rounded-xl px-4 py-3 flex items-center gap-3 cursor-pointer select-none ${
+                        darkMode
+                          ? "bg-[#312E81]/60 text-[#E0E7FF] border border-indigo-500/30"
+                          : "bg-[#EEF2FF] text-[#3730A3]"
+                      }`}
+                    >
                       <input
                         type="checkbox"
                         checked={addToKbChecked}
                         onChange={(e) => setAddToKbChecked(e.target.checked)}
                         className="w-5 h-5 rounded accent-[#4F46E5] cursor-pointer"
                       />
-                      <span className="text-[13.5px] font-bold text-[#3730A3] dark:text-indigo-200">
+                      <span className="text-[13.5px] font-bold">
                         Añadir a la base de conocimiento
                       </span>
                     </label>
@@ -1546,287 +1649,493 @@ export default function HomePage() {
         )}
 
         {/* =====================================================================
-            2. VISTA DEL PROFESOR: BASE DE CONOCIMIENTO (Neon Postgres + Syllabus)
+            2. VISTA DEL PROFESOR: BASE DE CONOCIMIENTO (Multi-file PDF/TXT/CSV + IA)
            ===================================================================== */}
         {appView === "profesor" && profesorNav === "conocimiento" && (
-          <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
+          <div className="max-w-[1140px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
             <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                <h1 className={`text-[28px] leading-tight font-bold ${textPrimary}`}>
                   Base de conocimiento
                 </h1>
-                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
-                  Carga el syllabus y el material del curso en Neon Postgres
-                  para que Gemma 4 responda con fuente verificable
+                <p className={`text-[14.5px] mt-0.5 ${textSecondary}`}>
+                  Sube múltiples archivos (PDF, TXT, CSV) para que la IA (Gemma
+                  4) los analice y responda dudas con fuente verificable
                 </p>
               </div>
-              <div className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2 flex items-center gap-2.5">
+              <button
+                type="button"
+                onClick={() => {
+                  const idx = SUBJECTS.findIndex(
+                    (s) => s.id === selectedSubjectId
+                  );
+                  const next = SUBJECTS[(idx + 1) % SUBJECTS.length];
+                  setSelectedSubjectId(next.id);
+                }}
+                className={`min-h-[44px] rounded-full border px-5 py-2 flex items-center gap-2.5 cursor-pointer ${surfaceCard}`}
+              >
                 <span
                   className="w-2.5 h-2.5 rounded-full"
                   style={{ backgroundColor: currentSubject.accentHex }}
                 />
-                <span className="text-sm font-bold">
+                <span className={`text-sm font-bold ${textPrimary}`}>
                   {loggedTeacher?.course || currentSubject.name}
                 </span>
-              </div>
+              </button>
             </header>
 
-            {/* Paso 1: Identificación Docente y Código de Curso */}
-            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
-              <div>
-                <h2 className="text-base font-bold">
-                  1. Cuenta Docente y Código de Asignatura
-                </h2>
-                <p className="text-sm text-[#475569] dark:text-slate-400">
-                  Conéctate con tu correo institucional para gestionar tus
-                  documentos en Neon Postgres y obtener el código de acceso para
-                  tus estudiantes.
-                </p>
+            {/* MÓDULO PRINCIPAL: Subir múltiples PDF, TXT, CSV y Analizarlos con IA */}
+            <section className={`rounded-2xl border p-6 space-y-5 shadow-2xs ${surfaceCard}`}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <div>
+                  <span className="inline-block rounded-full bg-[#CCFBF1] text-[#115E59] px-3 py-0.5 text-xs font-extrabold mb-1.5">
+                    Analizador Multimodal de Documentos IA
+                  </span>
+                  <h2 className={`text-lg font-bold ${textPrimary}`}>
+                    1. Añadir varios archivos (.PDF, .TXT, .CSV) para que la IA
+                    los analice
+                  </h2>
+                  <p className={`text-sm ${textSecondary}`}>
+                    Puedes seleccionar varios archivos a la vez (syllabus en
+                    PDF, listas o calificaciones en CSV, apuntes en TXT). La IA
+                    extrae su contenido, genera un resumen analítico y los
+                    indexa en <strong>{currentSubject.name}</strong>.
+                  </p>
+                </div>
               </div>
 
-              <form
-                onSubmit={handleDocenteLogin}
-                className="grid grid-cols-1 gap-3 sm:grid-cols-5"
-              >
-                <input
-                  type="email"
-                  required
-                  placeholder="Correo del docente *"
-                  value={docenteEmail}
-                  onChange={(e) => setDocenteEmail(e.target.value)}
-                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="Nombre del profesor"
-                  value={docenteName}
-                  onChange={(e) => setDocenteName(e.target.value)}
-                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="Asignatura (ej. Cálculo II)"
-                  value={docenteCourse}
-                  onChange={(e) => setDocenteCourse(e.target.value)}
-                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
-                />
-                <input
-                  type="text"
-                  placeholder="Código opcional (CALC-202)"
-                  value={docenteCustomCode}
-                  onChange={(e) =>
-                    setDocenteCustomCode(e.target.value.toUpperCase())
-                  }
-                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm font-mono uppercase"
-                />
-                <button
-                  type="submit"
-                  className="min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-4 py-2 text-sm font-bold text-white transition-colors"
+              <form onSubmit={handleAnalyzeFilesWithAI} className="space-y-4">
+                {/* Multi-file Dropzone */}
+                <label
+                  className={`block rounded-2xl border-2 border-dashed p-6 text-center cursor-pointer transition-colors ${
+                    darkMode
+                      ? "border-indigo-400/50 bg-[#0F172A]/70 hover:bg-[#0F172A]"
+                      : "border-indigo-300 bg-[#EEF2FF]/50 hover:bg-[#EEF2FF]"
+                  }`}
                 >
-                  Conectar cuenta
-                </button>
-              </form>
-
-              {docenteMsg && (
-                <div className="rounded-xl bg-[#EEF2FF] text-[#3730A3] px-4 py-2.5 text-xs font-bold">
-                  {docenteMsg}
-                </div>
-              )}
-
-              {loggedTeacher && (
-                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 flex flex-wrap items-center justify-between gap-4">
-                  <div className="space-y-1 text-sm">
-                    <p>
-                      Profesor: <strong>{loggedTeacher.name}</strong> (
-                      {loggedTeacher.email}) · Asignatura:{" "}
-                      <strong>{loggedTeacher.course}</strong>
-                    </p>
-                    <div className="flex items-center gap-2">
-                      <span>Estado:</span>
-                      {loggedTeacher.status === "pending" && (
-                        <span className="rounded-full bg-[#FEF3C7] text-[#92400E] px-2.5 py-0.5 text-xs font-bold">
-                          🕒 Pendiente de aprobación Admin
-                        </span>
-                      )}
-                      {loggedTeacher.status === "approved" && (
-                        <span className="rounded-full bg-[#DCFCE7] text-[#166534] px-2.5 py-0.5 text-xs font-bold">
-                          ✓ Aprobado y activo
-                        </span>
-                      )}
-                      {loggedTeacher.status === "rejected" && (
-                        <span className="rounded-full bg-[#FEE2E2] text-[#991B1B] px-2.5 py-0.5 text-xs font-bold">
-                          ⚠ Rechazado
-                        </span>
-                      )}
-                    </div>
+                  <input
+                    type="file"
+                    multiple
+                    accept=".pdf,.txt,.csv,.md,.json,application/pdf,text/plain,text/csv"
+                    onChange={handleSelectMultipleFiles}
+                    className="hidden"
+                  />
+                  <div className="w-12 h-12 rounded-2xl bg-[#4F46E5] text-white flex items-center justify-center mx-auto mb-3 font-bold text-lg shadow-xs">
+                    +
                   </div>
+                  <p className={`text-sm font-bold ${textPrimary}`}>
+                    Haz clic aquí para seleccionar varios archivos (.PDF, .TXT,
+                    .CSV)
+                  </p>
+                  <p className={`text-xs mt-1 ${textSecondary}`}>
+                    Soporta selección múltiple simultánea · PDFs de syllabus o
+                    guías, tablas CSV y documentos TXT/MD
+                  </p>
+                </label>
 
-                  {loggedTeacher.status === "approved" ? (
-                    <div className="flex items-center gap-3 rounded-xl bg-[#CCFBF1] text-[#115E59] px-4 py-2.5">
-                      <span className="text-xs font-bold">
-                        Código para estudiantes:{" "}
-                        <strong className="font-mono text-sm ml-1">
-                          {loggedTeacher.accessCode}
-                        </strong>
+                {/* List of queued files ready for AI analysis */}
+                {queuedFiles.length > 0 && (
+                  <div className={`rounded-xl border p-4 space-y-2.5 ${surfaceSubCard}`}>
+                    <div className="flex items-center justify-between">
+                      <span className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
+                        Archivos seleccionados para analizar ({queuedFiles.length})
                       </span>
                       <button
                         type="button"
-                        onClick={() =>
-                          handleCopyTeacherCode(loggedTeacher.accessCode)
-                        }
-                        className="min-h-[36px] rounded-lg bg-[#115E59] text-white px-3 py-1 text-xs font-bold"
+                        onClick={() => setQueuedFiles([])}
+                        className="text-xs font-bold text-[#EF4444] hover:underline cursor-pointer"
                       >
-                        {copiedCode ? "¡Copiado!" : "Copiar"}
+                        Vaciar lista
                       </button>
                     </div>
-                  ) : (
+
+                    <div className="flex flex-wrap gap-2">
+                      {queuedFiles.map((file, idx) => {
+                        const ext =
+                          file.name.split(".").pop()?.toUpperCase() || "DOC";
+                        return (
+                          <div
+                            key={`${file.name}-${idx}`}
+                            className={`inline-flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold ${surfaceCard}`}
+                          >
+                            <span
+                              className={`rounded px-1.5 py-0.5 text-[10px] font-extrabold ${
+                                ext === "PDF"
+                                  ? "bg-[#FEE2E2] text-[#991B1B]"
+                                  : ext === "CSV"
+                                    ? "bg-[#DCFCE7] text-[#166534]"
+                                    : "bg-[#EEF2FF] text-[#3730A3]"
+                              }`}
+                            >
+                              {ext}
+                            </span>
+                            <span className={textPrimary}>{file.name}</span>
+                            <span className={`text-[11px] font-normal ${textSecondary}`}>
+                              ({Math.max(1, Math.round(file.size / 1024))} KB)
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveQueuedFile(idx)}
+                              aria-label={`Quitar ${file.name}`}
+                              className="ml-1 text-[#EF4444] hover:opacity-80 font-extrabold cursor-pointer"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* Optional AI analysis instruction + category */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className={`block text-xs font-bold mb-1.5 ${textPrimary}`}>
+                      Categoría de los archivos
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) =>
+                        setCategory(e.target.value as ContentCategory)
+                      }
+                      className={`w-full min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    >
+                      <option value="Información general">
+                        Syllabus / Información general
+                      </option>
+                      <option value="Tareas">Tareas y Talleres</option>
+                      <option value="Notas">Evaluación y Notas (CSV/PDF)</option>
+                      <option value="Plataformas">Plataformas y Guías</option>
+                    </select>
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className={`block text-xs font-bold mb-1.5 ${textPrimary}`}>
+                      Instrucción opcional para el análisis de la IA
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: Extrae las fechas de exámenes, reglas de calificación y resume los datos del CSV..."
+                      value={customAiPrompt}
+                      onChange={(e) => setCustomAiPrompt(e.target.value)}
+                      className={`w-full min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    />
+                  </div>
+                </div>
+
+                {fileUploadError && (
+                  <div className="rounded-xl bg-[#FEE2E2] text-[#991B1B] px-4 py-3 text-xs font-bold">
+                    ⚠ {fileUploadError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={analyzingFiles}
+                  className="min-h-[48px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-6 py-3 text-sm font-bold text-white transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
+                >
+                  {analyzingFiles
+                    ? "Analizando archivos con IA (Gemma 4)..."
+                    : `Analizar ${
+                        queuedFiles.length > 0 ? `${queuedFiles.length} ` : ""
+                      }archivo(s) con la IA e indexar en ${currentSubject.name}`}
+                </button>
+              </form>
+
+              {/* Resultado del análisis de la IA */}
+              {aiAnalysisReport && (
+                <div className="rounded-2xl border-2 border-[#14B8A6] bg-[#CCFBF1]/25 dark:bg-[#115E59]/25 p-5 space-y-4">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="inline-flex items-center gap-1.5 rounded-full bg-[#CCFBF1] text-[#115E59] px-3 py-1 text-xs font-extrabold">
+                        <span className="w-2 h-2 rounded-full bg-[#14B8A6]" />
+                        Análisis completado · {aiAnalysisReport.modelName}
+                      </span>
+                    </div>
                     <button
                       type="button"
-                      onClick={() => setAppView("admin")}
-                      className="min-h-[44px] rounded-xl bg-[#FEF3C7] text-[#92400E] px-4 py-2 text-xs font-bold"
+                      onClick={() => setAppView("estudiante")}
+                      className="min-h-[38px] rounded-xl bg-[#4F46E5] text-white px-3.5 py-1.5 text-xs font-bold cursor-pointer"
                     >
-                      Ir a Panel Admin para aprobar →
+                      Probar preguntas en el Chat del estudiante →
                     </button>
+                  </div>
+
+                  <div className="space-y-2">
+                    <h3 className={`text-sm font-bold ${textPrimary}`}>
+                      Resumen del análisis de la IA:
+                    </h3>
+                    <p className={`text-sm whitespace-pre-wrap leading-relaxed ${textPrimary}`}>
+                      {aiAnalysisReport.summary}
+                    </p>
+                  </div>
+
+                  {aiAnalysisReport.keyFindings.length > 0 && (
+                    <div className="space-y-1.5">
+                      <h4 className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
+                        Hallazgos detectados en los archivos:
+                      </h4>
+                      <ul className="space-y-1 text-xs list-disc list-inside">
+                        {aiAnalysisReport.keyFindings.map((finding, idx) => (
+                          <li key={idx} className={textPrimary}>
+                            {finding}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {aiAnalysisReport.suggestedQuestions.length > 0 && (
+                    <div className="space-y-2 pt-2 border-t border-teal-500/20">
+                      <p className={`text-xs font-bold ${textSecondary}`}>
+                        Haz clic en una pregunta para consultarla con la IA en
+                        el chat:
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {aiAnalysisReport.suggestedQuestions.map((sq) => (
+                          <button
+                            key={sq}
+                            type="button"
+                            onClick={() => {
+                              setAppView("estudiante");
+                              askQuestionInChat(sq);
+                            }}
+                            className="rounded-full bg-[#CCFBF1] text-[#115E59] hover:opacity-90 px-3 py-1.5 text-xs font-bold cursor-pointer"
+                          >
+                            💬 {sq}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
                   )}
                 </div>
               )}
             </section>
 
-            {/* Paso 2: Subir Syllabus / Material */}
-            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
-              <h2 className="text-base font-bold">
-                2. Cargar sección del syllabus o material del curso
-              </h2>
-
-              {!loggedTeacher || loggedTeacher.status !== "approved" ? (
-                <div className="rounded-xl bg-[#FEF3C7] text-[#92400E] p-4 text-sm font-medium">
-                  Conéctate arriba con una cuenta docente aprobada para guardar
-                  nuevos fragmentos en Neon Postgres. Abajo puedes explorar las
-                  secciones del syllabus de referencia de{" "}
-                  <strong>{currentSubject.name}</strong>.
-                </div>
-              ) : (
-                <form onSubmit={handleAddContent} className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    <div>
-                      <label className="block text-xs font-bold mb-1.5">
-                        Categoría
-                      </label>
-                      <select
-                        value={category}
-                        onChange={(e) =>
-                          setCategory(e.target.value as ContentCategory)
-                        }
-                        className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
-                      >
-                        <option value="Información general">
-                          Syllabus / Información general
-                        </option>
-                        <option value="Tareas">Tareas y Talleres</option>
-                        <option value="Notas">Evaluación y Notas</option>
-                        <option value="Plataformas">Plataformas</option>
-                      </select>
-                    </div>
-                    <div className="sm:col-span-2">
-                      <label className="block text-xs font-bold mb-1.5">
-                        Etiqueta de fuente (ej. Syllabus · Sección 3.2)
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: Syllabus · Sección 3.2 — Política de calculadoras"
-                        value={contentTitle}
-                        onChange={(e) => setContentTitle(e.target.value)}
-                        className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-
+            {/* Paso 2: Añadir fragmento manual de texto + Cuenta Docente opcional */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Manual Snippet Form */}
+              <section className={`rounded-2xl border p-6 space-y-4 shadow-2xs ${surfaceCard}`}>
+                <h2 className={`text-base font-bold ${textPrimary}`}>
+                  2. Redactar o pegar sección del syllabus manualmente
+                </h2>
+                <form onSubmit={handleAddManualContent} className="space-y-3">
                   <div>
-                    <div className="flex items-center justify-between mb-1.5">
-                      <label className="text-xs font-bold">
-                        Contenido original del fragmento
-                      </label>
-                      <label className="cursor-pointer text-xs font-bold text-[#4F46E5] hover:underline">
-                        + Importar archivo (.txt, .md, .csv)
-                        <input
-                          type="file"
-                          accept=".txt,.md,.csv,.json"
-                          onChange={handleUploadFile}
-                          className="hidden"
-                        />
-                      </label>
-                    </div>
+                    <label className={`block text-xs font-bold mb-1 ${textPrimary}`}>
+                      Etiqueta de fuente (ej. Syllabus · Sección 3.2)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="Ej: Syllabus · Sección 3.2 — Política de calculadoras"
+                      value={contentTitle}
+                      onChange={(e) => setContentTitle(e.target.value)}
+                      className={`w-full min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    />
+                  </div>
+                  <div>
+                    <label className={`block text-xs font-bold mb-1 ${textPrimary}`}>
+                      Contenido detallado
+                    </label>
                     <textarea
                       required
                       rows={4}
-                      placeholder="Pega aquí el texto exacto del syllabus o guía para que la IA lo cite como fuente..."
+                      placeholder="Escribe o pega aquí una regla, fecha o criterio del curso..."
                       value={contentBody}
                       onChange={(e) => setContentBody(e.target.value)}
-                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-3.5 text-sm"
+                      className={`w-full rounded-xl border p-3.5 text-sm ${inputSurface}`}
                     />
                   </div>
-
                   <button
                     type="submit"
                     disabled={savingContent}
-                    className="min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-5 py-2.5 text-sm font-bold text-white transition-colors"
+                    className="min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-5 py-2.5 text-sm font-bold text-white transition-colors cursor-pointer"
                   >
                     {savingContent
-                      ? "Guardando en Neon Postgres..."
-                      : "Guardar en la base de conocimiento"}
+                      ? "Guardando..."
+                      : "Añadir fragmento a la base de conocimiento"}
                   </button>
                 </form>
-              )}
+                {docenteMsg && (
+                  <div className="rounded-xl bg-[#DCFCE7] text-[#166534] px-4 py-2.5 text-xs font-bold">
+                    ✓ {docenteMsg}
+                  </div>
+                )}
+              </section>
 
-              {/* List of existing knowledge base sections */}
-              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
-                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
-                  Fragmentos activos para el asistente ({currentSubject.name})
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-                  {currentSubject.syllabusSections.map((sec) => (
-                    <div
-                      key={sec.id}
-                      className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 space-y-1.5"
-                    >
-                      <span className="inline-block rounded-lg bg-[#CCFBF1] text-[#115E59] px-2.5 py-0.5 text-xs font-bold">
-                        {sec.section}
-                      </span>
-                      <h4 className="text-sm font-bold">{sec.title}</h4>
-                      <p className="text-xs text-[#475569] dark:text-slate-400 leading-relaxed">
-                        {sec.snippet}
-                      </p>
-                    </div>
-                  ))}
-                  {myTeacherContents.map((item) => (
-                    <div
-                      key={item.id}
-                      className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 space-y-1.5 flex flex-col justify-between"
-                    >
-                      <div>
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="inline-block rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-0.5 text-xs font-bold">
-                            {item.category}
-                          </span>
+              {/* Cuenta Docente y Código para Neon Postgres */}
+              <section className={`rounded-2xl border p-6 space-y-4 shadow-2xs ${surfaceCard}`}>
+                <div>
+                  <h2 className={`text-base font-bold ${textPrimary}`}>
+                    3. Sincronización Docente en Neon Postgres (Opcional)
+                  </h2>
+                  <p className={`text-xs mt-1 ${textSecondary}`}>
+                    Conéctate con tu correo institucional si deseas generar un
+                    código compartido y persistir los archivos en tu cuenta de
+                    Neon Postgres.
+                  </p>
+                </div>
+
+                <form onSubmit={handleDocenteLogin} className="space-y-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="email"
+                      required
+                      placeholder="Correo del docente *"
+                      value={docenteEmail}
+                      onChange={(e) => setDocenteEmail(e.target.value)}
+                      className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Nombre del profesor"
+                      value={docenteName}
+                      onChange={(e) => setDocenteName(e.target.value)}
+                      className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <input
+                      type="text"
+                      placeholder="Asignatura (ej. Cálculo II)"
+                      value={docenteCourse}
+                      onChange={(e) => setDocenteCourse(e.target.value)}
+                      className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-sm ${inputSurface}`}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Código opcional (CALC-202)"
+                      value={docenteCustomCode}
+                      onChange={(e) =>
+                        setDocenteCustomCode(e.target.value.toUpperCase())
+                      }
+                      className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-sm font-mono uppercase ${inputSurface}`}
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    className="w-full min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-4 py-2 text-sm font-bold text-white transition-colors cursor-pointer"
+                  >
+                    Conectar cuenta docente
+                  </button>
+                </form>
+
+                {loggedTeacher && (
+                  <div className={`rounded-xl border p-4 space-y-2 ${surfaceSubCard}`}>
+                    <p className={`text-xs ${textPrimary}`}>
+                      Docente: <strong>{loggedTeacher.name}</strong> (
+                      {loggedTeacher.email}) · Curso:{" "}
+                      <strong>{loggedTeacher.course}</strong>
+                    </p>
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      {loggedTeacher.status === "approved" ? (
+                        <div className="flex items-center gap-2 rounded-lg bg-[#CCFBF1] text-[#115E59] px-3 py-1.5 text-xs font-bold">
+                          <span>Código: {loggedTeacher.accessCode}</span>
                           <button
                             type="button"
-                            onClick={() => handleDeleteContent(item.id)}
-                            className="text-xs font-bold text-[#991B1B] hover:underline"
+                            onClick={() =>
+                              handleCopyTeacherCode(loggedTeacher.accessCode)
+                            }
+                            className="underline ml-1 cursor-pointer"
                           >
-                            Eliminar
+                            {copiedCode ? "¡Copiado!" : "Copiar"}
                           </button>
                         </div>
-                        <h4 className="text-sm font-bold mt-1.5">
-                          {item.title}
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setAppView("admin")}
+                          className="rounded-lg bg-[#FEF3C7] text-[#92400E] px-3 py-1.5 text-xs font-bold cursor-pointer"
+                        >
+                          🕒 Pendiente · Ir a Admin para aprobar →
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </section>
+            </div>
+
+            {/* List of all active documents and syllabus fragments */}
+            <section className={`rounded-2xl border p-6 space-y-4 shadow-2xs ${surfaceCard}`}>
+              <h3 className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
+                DOCUMENTOS Y FRAGMENTOS ACTIVOS PARA LA IA EN{" "}
+                {currentSubject.name.toUpperCase()} (
+                {activeSubjectSections.length + myTeacherContents.length})
+              </h3>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                {activeSubjectSections.map((sec) => {
+                  const isUploaded = sec.id.startsWith("file-") || sec.id.startsWith("manual-") || sec.id.startsWith("kb-");
+                  return (
+                    <div
+                      key={sec.id}
+                      className={`rounded-xl border p-4 space-y-2 flex flex-col justify-between ${surfaceSubCard}`}
+                    >
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`inline-block rounded-lg px-2.5 py-0.5 text-xs font-bold ${
+                              sec.fileType === "PDF"
+                                ? "bg-[#FEE2E2] text-[#991B1B]"
+                                : sec.fileType === "CSV"
+                                  ? "bg-[#DCFCE7] text-[#166534]"
+                                  : "bg-[#CCFBF1] text-[#115E59]"
+                            }`}
+                          >
+                            {sec.section}
+                          </span>
+                          {isUploaded && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDeleteUploadedSection(sec.id)
+                              }
+                              className="text-xs font-bold text-[#EF4444] hover:underline cursor-pointer"
+                            >
+                              Quitar
+                            </button>
+                          )}
+                        </div>
+                        <h4 className={`text-sm font-bold ${textPrimary}`}>
+                          {sec.title}
                         </h4>
-                        <p className="text-xs text-[#475569] dark:text-slate-400 mt-1 whitespace-pre-wrap">
-                          {item.content}
+                        <p className={`text-xs leading-relaxed line-clamp-4 whitespace-pre-wrap ${textSecondary}`}>
+                          {sec.snippet}
                         </p>
                       </div>
                     </div>
-                  ))}
-                </div>
+                  );
+                })}
+
+                {myTeacherContents.map((item) => (
+                  <div
+                    key={item.id}
+                    className={`rounded-xl border p-4 space-y-1.5 flex flex-col justify-between ${surfaceSubCard}`}
+                  >
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="inline-block rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-0.5 text-xs font-bold">
+                          {item.category}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteContent(item.id)}
+                          className="text-xs font-bold text-[#EF4444] hover:underline cursor-pointer"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+                      <h4 className={`text-sm font-bold mt-1.5 ${textPrimary}`}>
+                        {item.title}
+                      </h4>
+                      <p className={`text-xs mt-1 line-clamp-4 whitespace-pre-wrap ${textSecondary}`}>
+                        {item.content}
+                      </p>
+                    </div>
+                  </div>
+                ))}
               </div>
             </section>
           </div>
@@ -1839,10 +2148,10 @@ export default function HomePage() {
           <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
             <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
               <div>
-                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                <h1 className={`text-[28px] leading-tight font-bold ${textPrimary}`}>
                   Métricas del curso
                 </h1>
-                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
+                <p className={`text-[14.5px] mt-0.5 ${textSecondary}`}>
                   Impacto del asistente IA y oportunidades de mejora en el
                   syllabus de {currentSubject.name}
                 </p>
@@ -1850,48 +2159,61 @@ export default function HomePage() {
             </header>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
-                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border p-6 ${surfaceCard}`}>
+                <p className={`text-xs font-bold ${textSecondary}`}>
                   Dudas resueltas por la IA
                 </p>
-                <p className="mt-2 text-3xl font-extrabold text-[#115E59] dark:text-[#14B8A6]">
+                <p
+                  className={`mt-2 text-3xl font-extrabold ${
+                    darkMode ? "text-[#2DD4BF]" : "text-[#115E59]"
+                  }`}
+                >
                   [ 00 % ]
                 </p>
-                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                <p className={`mt-2 text-xs ${textSecondary}`}>
                   Cada ticket respondido con &ldquo;Añadir a la base de
-                  conocimiento&rdquo; incrementa esta tasa automáticamente.
+                  conocimiento&rdquo; o archivo PDF/CSV cargado incrementa esta
+                  tasa.
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
-                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border p-6 ${surfaceCard}`}>
+                <p className={`text-xs font-bold ${textSecondary}`}>
                   Tiempo ahorrado esta semana
                 </p>
-                <p className="mt-2 text-3xl font-extrabold text-[#3730A3] dark:text-indigo-400">
+                <p
+                  className={`mt-2 text-3xl font-extrabold ${
+                    darkMode ? "text-[#818CF8]" : "text-[#3730A3]"
+                  }`}
+                >
                   [ 0 h ]
                 </p>
-                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                <p className={`mt-2 text-xs ${textSecondary}`}>
                   Estimado a partir de preguntas repetidas agrupadas en un solo
                   ticket.
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
-                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+              <div className={`rounded-2xl border p-6 ${surfaceCard}`}>
+                <p className={`text-xs font-bold ${textSecondary}`}>
                   Tema más confuso
                 </p>
-                <p className="mt-2 text-3xl font-extrabold text-[#92400E] dark:text-amber-400">
+                <p
+                  className={`mt-2 text-3xl font-extrabold ${
+                    darkMode ? "text-[#FBBF24]" : "text-[#92400E]"
+                  }`}
+                >
                   [ tema ]
                 </p>
-                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                <p className={`mt-2 text-xs ${textSecondary}`}>
                   Detectado en las preguntas que requirieron escalamiento al
                   profesor.
                 </p>
               </div>
             </div>
 
-            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
-              <h2 className="text-base font-bold">
+            <section className={`rounded-2xl border p-6 space-y-4 ${surfaceCard}`}>
+              <h2 className={`text-base font-bold ${textPrimary}`}>
                 Sugerencias para mejorar el syllabus según los tickets recibidos
               </h2>
               <div className="space-y-3">
@@ -1910,7 +2232,7 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setProfesorNav("bandeja")}
-                    className="min-h-[40px] shrink-0 rounded-xl bg-[#92400E] text-white px-3.5 py-2 text-xs font-bold"
+                    className="min-h-[40px] shrink-0 rounded-xl bg-[#92400E] text-white px-3.5 py-2 text-xs font-bold cursor-pointer"
                   >
                     Ver en bandeja
                   </button>
@@ -1936,10 +2258,9 @@ export default function HomePage() {
            ===================================================================== */}
         {appView === "estudiante" && (
           <div className="h-full flex flex-col">
-            {/* Top Subject Selector Tabs with Accent Colors (STYLES.md §1 & §2) */}
-            <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 md:px-7">
+            {/* Top Subject Selector Tabs */}
+            <header className={`border-b px-4 py-3 md:px-7 ${surfaceCard}`}>
               <div className="flex flex-wrap items-center justify-between gap-3">
-                {/* Subject Tabs */}
                 <div
                   role="tablist"
                   aria-label="Selector de asignatura"
@@ -1954,10 +2275,12 @@ export default function HomePage() {
                         aria-selected={active}
                         type="button"
                         onClick={() => setSelectedSubjectId(subj.id)}
-                        className={`min-h-[44px] rounded-xl px-4 py-2 text-sm font-bold flex items-center gap-2.5 transition-all border ${
+                        className={`min-h-[44px] rounded-xl px-4 py-2 text-sm font-bold flex items-center gap-2.5 transition-all border cursor-pointer ${
                           active
-                            ? "bg-[#EEF2FF] dark:bg-slate-800 text-[#1E293B] dark:text-white border-current shadow-2xs"
-                            : "bg-transparent text-[#475569] dark:text-slate-400 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60"
+                            ? darkMode
+                              ? "bg-[#312E81]/60 text-white border-current shadow-2xs"
+                              : "bg-[#EEF2FF] text-[#1E293B] border-current shadow-2xs"
+                            : `${textSecondary} border-transparent hover:bg-slate-200/50 dark:hover:bg-slate-800`
                         }`}
                         style={
                           active ? { borderColor: subj.accentHex } : undefined
@@ -1973,12 +2296,11 @@ export default function HomePage() {
                   })}
                 </div>
 
-                {/* Right controls: Connect by Teacher Code & Toggle Side Context Panel */}
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => setShowCodeModal((v) => !v)}
-                    className="min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 px-3.5 py-2 text-xs font-bold text-[#3730A3] dark:text-indigo-300"
+                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-bold cursor-pointer ${surfaceSubCard}`}
                   >
                     {connectedTeacher
                       ? `🔗 Código activo: ${connectedTeacher.accessCode}`
@@ -1988,23 +2310,22 @@ export default function HomePage() {
                   <button
                     type="button"
                     onClick={() => setStudentSidebarOpen((o) => !o)}
-                    className="min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-bold text-[#475569] dark:text-slate-300"
+                    className={`min-h-[44px] rounded-xl border px-3.5 py-2 text-xs font-bold cursor-pointer ${surfaceSubCard}`}
                   >
                     {studentSidebarOpen
                       ? "Ocultar contexto"
-                      : "📅 Ver syllabus y entregas"}
+                      : "📅 Ver syllabus y archivos"}
                   </button>
                 </div>
               </div>
 
-              {/* Optional Collapsible Bar to Connect with Real Teacher Code (Neon Postgres) */}
               {showCodeModal && (
                 <form
                   onSubmit={handleConnectByCode}
-                  className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-end gap-3"
+                  className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-end gap-3"
                 >
                   <div>
-                    <label className="block text-[11px] font-bold mb-1">
+                    <label className={`block text-[11px] font-bold mb-1 ${textPrimary}`}>
                       Código del curso (Neon Postgres)
                     </label>
                     <input
@@ -2014,35 +2335,35 @@ export default function HomePage() {
                       onChange={(e) =>
                         setStudentCodeInput(e.target.value.toUpperCase())
                       }
-                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs font-mono uppercase"
+                      className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs font-mono uppercase ${inputSurface}`}
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold mb-1">
+                    <label className={`block text-[11px] font-bold mb-1 ${textPrimary}`}>
                       Tu nombre
                     </label>
                     <input
                       type="text"
                       value={studentName}
                       onChange={(e) => setStudentName(e.target.value)}
-                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                      className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs ${inputSurface}`}
                     />
                   </div>
                   <div>
-                    <label className="block text-[11px] font-bold mb-1">
+                    <label className={`block text-[11px] font-bold mb-1 ${textPrimary}`}>
                       Tu correo
                     </label>
                     <input
                       type="email"
                       value={studentEmail}
                       onChange={(e) => setStudentEmail(e.target.value)}
-                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                      className={`min-h-[44px] rounded-xl border px-3 py-1.5 text-xs ${inputSurface}`}
                     />
                   </div>
                   <button
                     type="submit"
                     disabled={connectingCode}
-                    className="min-h-[44px] rounded-xl bg-[#4F46E5] text-white px-4 py-2 text-xs font-bold"
+                    className="min-h-[44px] rounded-xl bg-[#4F46E5] text-white px-4 py-2 text-xs font-bold cursor-pointer"
                   >
                     {connectingCode ? "Verificando..." : "Conectar asignatura"}
                   </button>
@@ -2057,27 +2378,24 @@ export default function HomePage() {
 
             {/* Student Main Body: Center Chat + Collapsible Context Drawer */}
             <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
-              {/* Center Conversation Area */}
               <div className="flex-1 flex flex-col p-4 md:p-6 max-w-4xl mx-auto w-full">
                 {/* Messages Stream */}
                 <div className="flex-1 space-y-4 overflow-y-auto pr-1 pb-4">
                   {currentMessages.length === 0 ? (
-                    /* Friendly Empty State (STYLES.md §3) */
-                    <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 p-10 text-center my-8 space-y-2">
+                    <div className={`rounded-2xl border border-dashed p-10 text-center my-8 space-y-2 ${surfaceCard}`}>
                       <div
                         className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white font-bold text-lg"
                         style={{ backgroundColor: currentSubject.accentHex }}
                       >
                         IA
                       </div>
-                      <h2 className="text-lg font-bold">
+                      <h2 className={`text-lg font-bold ${textPrimary}`}>
                         Pregúntame sobre el syllabus, fechas o evaluación
                       </h2>
-                      <p className="text-sm text-[#475569] dark:text-slate-400 max-w-md mx-auto">
-                        Respondo al instante citando la sección exacta del
-                        material de <strong>{currentSubject.name}</strong>. Si
-                        algo no está en el syllabus, te preparo un ticket para
-                        el profesor.
+                      <p className={`text-sm max-w-md mx-auto ${textSecondary}`}>
+                        Analizo todos los archivos PDF, CSV y TXT cargados en{" "}
+                        <strong>{currentSubject.name}</strong>. Si algo no está
+                        en el material, te preparo un ticket para el profesor.
                       </p>
                     </div>
                   ) : (
@@ -2088,7 +2406,6 @@ export default function HomePage() {
                           msg.sender === "student" ? "items-end" : "items-start"
                         }`}
                       >
-                        {/* Sender Role Badge (Color communicates who speaks: Teal = IA, Amber = Professor) */}
                         {msg.sender !== "student" && (
                           <div className="flex items-center gap-2 mb-1.5 px-1">
                             {msg.sender === "bot" ? (
@@ -2104,28 +2421,26 @@ export default function HomePage() {
                             )}
 
                             {msg.confidence && (
-                              <span className="text-[11px] font-semibold text-[#475569] dark:text-slate-400">
+                              <span className={`text-[11px] font-semibold ${textSecondary}`}>
                                 · {msg.confidence}
                               </span>
                             )}
                           </div>
                         )}
 
-                        {/* Bubble Content */}
                         <div
                           className={`max-w-2xl rounded-2xl p-4 text-sm leading-relaxed ${
                             msg.sender === "student"
                               ? "bg-[#4F46E5] text-white font-medium"
                               : msg.sender === "professor"
                                 ? "bg-[#FEF3C7] text-[#92400E] border border-[#F59E0B]/40 font-medium"
-                                : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[#1E293B] dark:text-[#F1F5F9] shadow-2xs"
+                                : `border shadow-2xs ${surfaceCard}`
                           }`}
                         >
                           <p className="whitespace-pre-wrap">{msg.text}</p>
 
-                          {/* Source Citation Tag + Thumbs Feedback for AI Answers (STYLES.md §1 & §3) */}
                           {msg.sender === "bot" && msg.answered && (
-                            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                            <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-700 flex flex-wrap items-center justify-between gap-2">
                               {msg.sourceLabel && (
                                 <button
                                   type="button"
@@ -2136,7 +2451,7 @@ export default function HomePage() {
                                         : msg.id
                                     )
                                   }
-                                  className="min-h-[36px] inline-flex items-center gap-1.5 rounded-lg bg-[#CCFBF1] text-[#115E59] px-3 py-1 text-xs font-bold hover:opacity-90 transition-opacity"
+                                  className="min-h-[36px] inline-flex items-center gap-1.5 rounded-lg bg-[#CCFBF1] text-[#115E59] px-3 py-1 text-xs font-bold hover:opacity-90 transition-opacity cursor-pointer"
                                 >
                                   <span>📄 {msg.sourceLabel}</span>
                                   <span className="underline ml-1">
@@ -2152,10 +2467,10 @@ export default function HomePage() {
                                   type="button"
                                   onClick={() => handleFeedback(msg.id, "up")}
                                   aria-label="Respuesta útil"
-                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border ${
+                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border cursor-pointer ${
                                     msg.feedback === "up"
                                       ? "bg-[#DCFCE7] text-[#166534] border-[#22C55E]"
-                                      : "border-slate-200 dark:border-slate-700 text-[#475569]"
+                                      : `border-slate-300 dark:border-slate-600 ${textSecondary}`
                                   }`}
                                 >
                                   👍
@@ -2164,10 +2479,10 @@ export default function HomePage() {
                                   type="button"
                                   onClick={() => handleFeedback(msg.id, "down")}
                                   aria-label="Respuesta poco útil"
-                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border ${
+                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border cursor-pointer ${
                                     msg.feedback === "down"
                                       ? "bg-[#FEE2E2] text-[#991B1B] border-[#EF4444]"
-                                      : "border-slate-200 dark:border-slate-700 text-[#475569]"
+                                      : `border-slate-300 dark:border-slate-600 ${textSecondary}`
                                   }`}
                                 >
                                   👎
@@ -2176,31 +2491,31 @@ export default function HomePage() {
                             </div>
                           )}
 
-                          {/* Expanded Original Source Snippet */}
                           {expandedSourceMsgId === msg.id &&
                             msg.sourceSnippet && (
-                              <div className="mt-2.5 rounded-xl bg-[#F8FAFC] dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 text-xs text-[#475569] dark:text-slate-300">
-                                <p className="font-bold text-[#115E59] dark:text-[#14B8A6] mb-1">
+                              <div className={`mt-2.5 rounded-xl border p-3 text-xs ${surfaceSubCard}`}>
+                                <p className="font-bold text-[#14B8A6] mb-1">
                                   Fragmento original ({msg.sourceLabel}):
                                 </p>
-                                <p>{msg.sourceSnippet}</p>
+                                <p className="whitespace-pre-wrap">
+                                  {msg.sourceSnippet}
+                                </p>
                               </div>
                             )}
 
-                          {/* EL MOMENTO DEL TICKET: Editable Draft when AI doesn't know (STYLES.md §1) */}
                           {msg.isTicketDraft && !msg.ticketSent && (
-                            <div className="mt-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-[#EEF2FF]/70 dark:bg-slate-950 p-4 space-y-3">
+                            <div className={`mt-3.5 rounded-xl border p-4 space-y-3 ${surfaceSubCard}`}>
                               <div className="flex items-center justify-between">
-                                <span className="text-xs font-extrabold uppercase tracking-wider text-[#3730A3] dark:text-indigo-300">
+                                <span className="text-xs font-extrabold uppercase tracking-wider text-[#4F46E5] dark:text-indigo-300">
                                   Borrador de ticket para el profesor
                                 </span>
-                                <span className="text-[11px] font-semibold text-[#475569]">
+                                <span className={`text-[11px] font-semibold ${textSecondary}`}>
                                   Editable antes de enviar
                                 </span>
                               </div>
 
                               <div>
-                                <label className="block text-xs font-bold text-[#1E293B] dark:text-slate-200 mb-1">
+                                <label className={`block text-xs font-bold mb-1 ${textPrimary}`}>
                                   Tu pregunta
                                 </label>
                                 <input
@@ -2212,12 +2527,12 @@ export default function HomePage() {
                                       e.target.value
                                     )
                                   }
-                                  className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-medium"
+                                  className={`w-full min-h-[44px] rounded-xl border px-3 py-2 text-xs font-medium ${inputSurface}`}
                                 />
                               </div>
 
                               <div>
-                                <label className="block text-xs font-bold text-[#1E293B] dark:text-slate-200 mb-1">
+                                <label className={`block text-xs font-bold mb-1 ${textPrimary}`}>
                                   Contexto de la conversación
                                 </label>
                                 <textarea
@@ -2229,21 +2544,20 @@ export default function HomePage() {
                                       e.target.value
                                     )
                                   }
-                                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-2.5 text-xs"
+                                  className={`w-full rounded-xl border p-2.5 text-xs ${inputSurface}`}
                                 />
                               </div>
 
                               <button
                                 type="button"
                                 onClick={() => handleSendTicketToProfessor(msg)}
-                                className="w-full min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold text-xs py-2.5 px-4 transition-colors"
+                                className="w-full min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold text-xs py-2.5 px-4 transition-colors cursor-pointer"
                               >
                                 Enviar al profesor
                               </button>
                             </div>
                           )}
 
-                          {/* Confirmation once ticket is sent */}
                           {msg.isTicketDraft && msg.ticketSent && (
                             <div className="mt-3 rounded-xl bg-[#DCFCE7] text-[#166534] p-3 text-xs font-bold space-y-1">
                               <p>
@@ -2252,7 +2566,6 @@ export default function HomePage() {
                               </p>
                               <p className="font-normal">
                                 Puedes seguir usando el chat mientras esperas.
-                                Revisa el estado abajo en la línea de tiempo.
                               </p>
                             </div>
                           )}
@@ -2261,19 +2574,18 @@ export default function HomePage() {
                     ))
                   )}
 
-                  {/* Micro-interaction: "escribiendo..." animation */}
                   {askingGemma && (
                     <div className="inline-flex items-center gap-2 rounded-2xl bg-[#CCFBF1] text-[#115E59] px-4 py-2.5 text-xs font-bold animate-pulse">
-                      <span>Asistente IA escribiendo…</span>
+                      <span>Asistente IA analizando documentos…</span>
                     </div>
                   )}
                 </div>
 
-                {/* Seguimiento del Ticket: Línea de tiempo de 3 estados (STYLES.md §1 & §4.2) */}
+                {/* Seguimiento del Ticket */}
                 {studentTickets.length > 0 && (
-                  <div className="mb-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                  <div className={`mb-4 rounded-2xl border p-4 space-y-3 ${surfaceCard}`}>
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                      <span className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
                         Seguimiento de tus tickets ({studentTickets.length})
                       </span>
                       <button
@@ -2282,7 +2594,7 @@ export default function HomePage() {
                           setAppView("profesor");
                           setProfesorNav("bandeja");
                         }}
-                        className="text-xs font-bold text-[#4F46E5] hover:underline"
+                        className="text-xs font-bold text-[#4F46E5] dark:text-indigo-400 hover:underline cursor-pointer"
                       >
                         Ver en bandeja del profesor →
                       </button>
@@ -2291,16 +2603,17 @@ export default function HomePage() {
                     {studentTickets.slice(0, 2).map((tk) => (
                       <div
                         key={tk.id}
-                        className="rounded-xl bg-[#F8FAFC] dark:bg-slate-950 p-3.5 border border-slate-200/80 dark:border-slate-800 space-y-2.5"
+                        className={`rounded-xl p-3.5 border space-y-2.5 ${surfaceSubCard}`}
                       >
                         <div className="flex flex-wrap items-center justify-between gap-2">
-                          <p className="text-xs font-bold">{tk.question}</p>
-                          <span className="text-[11px] text-[#475569]">
+                          <p className={`text-xs font-bold ${textPrimary}`}>
+                            {tk.question}
+                          </p>
+                          <span className={`text-[11px] ${textSecondary}`}>
                             {tk.createdAt}
                           </span>
                         </div>
 
-                        {/* 3-State Timeline: Enviado -> En revisión -> Respondido */}
                         <div className="grid grid-cols-3 gap-2">
                           <div className="rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-1.5 text-[11px] font-bold flex items-center gap-1.5">
                             <span>📤</span>
@@ -2312,7 +2625,7 @@ export default function HomePage() {
                               tk.step === "en_revision" ||
                               tk.step === "respondido"
                                 ? "bg-[#FEF3C7] text-[#92400E]"
-                                : "bg-slate-100 dark:bg-slate-900 text-slate-400"
+                                : "bg-slate-200/70 dark:bg-slate-800 text-slate-400"
                             }`}
                           >
                             <span>🕒</span>
@@ -2323,7 +2636,7 @@ export default function HomePage() {
                             className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold flex items-center gap-1.5 ${
                               tk.step === "respondido"
                                 ? "bg-[#DCFCE7] text-[#166534]"
-                                : "bg-slate-100 dark:bg-slate-900 text-slate-400"
+                                : "bg-slate-200/70 dark:bg-slate-800 text-slate-400"
                             }`}
                           >
                             <span>✓</span>
@@ -2335,7 +2648,7 @@ export default function HomePage() {
                   </div>
                 )}
 
-                {/* Suggestion Chips (STYLES.md §1 & §4.1) */}
+                {/* Suggestion Chips */}
                 <div className="flex flex-wrap gap-2 mb-3">
                   {[
                     "¿Cuándo es el próximo parcial?",
@@ -2347,7 +2660,11 @@ export default function HomePage() {
                       key={chip}
                       type="button"
                       onClick={() => askQuestionInChat(chip)}
-                      className="min-h-[40px] rounded-full bg-[#EEF2FF] dark:bg-slate-800 text-[#3730A3] dark:text-indigo-200 hover:bg-indigo-100 px-3.5 py-1.5 text-xs font-bold transition-colors"
+                      className={`min-h-[40px] rounded-full px-3.5 py-1.5 text-xs font-bold transition-colors cursor-pointer ${
+                        darkMode
+                          ? "bg-[#312E81]/70 text-indigo-100 hover:bg-[#312E81]"
+                          : "bg-[#EEF2FF] text-[#3730A3] hover:bg-indigo-100"
+                      }`}
                     >
                       {chip}
                     </button>
@@ -2365,32 +2682,31 @@ export default function HomePage() {
                   <input
                     type="text"
                     required
-                    placeholder={`Escribe tu duda de ${
+                    placeholder={`Pregunta sobre el syllabus o los PDF/CSV/TXT de ${
                       connectedTeacher?.course || currentSubject.name
                     }...`}
                     value={question}
                     onChange={(e) => setQuestion(e.target.value)}
-                    className="flex-1 min-h-[48px] rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm focus:border-[#4F46E5] focus:outline-none"
+                    className={`flex-1 min-h-[48px] rounded-2xl border px-4 py-3 text-sm focus:border-[#4F46E5] focus:outline-none ${inputSurface}`}
                   />
                   <button
                     type="submit"
                     disabled={askingGemma}
-                    className="min-h-[48px] rounded-2xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold px-6 py-3 text-sm transition-colors disabled:opacity-50"
+                    className="min-h-[48px] rounded-2xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold px-6 py-3 text-sm transition-colors disabled:opacity-50 cursor-pointer"
                   >
                     Preguntar
                   </button>
                 </form>
               </div>
 
-              {/* Collapsible Student Right Panel: Calendario, Syllabus & Material (STYLES.md §1 & §5) */}
+              {/* Collapsible Student Right Panel */}
               {studentSidebarOpen && (
                 <aside
                   aria-label="Contexto de la asignatura"
-                  className="w-full lg:w-[340px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-6 overflow-y-auto"
+                  className={`w-full lg:w-[350px] shrink-0 border-t lg:border-t-0 lg:border-l p-5 space-y-6 overflow-y-auto ${surfaceCard}`}
                 >
-                  {/* Próximas entregas (Red used ONLY for critical deadline) */}
                   <div className="space-y-2.5">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                    <h3 className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
                       Calendario de entregas
                     </h3>
                     {currentSubject.deadlines.map((dl) => (
@@ -2399,7 +2715,7 @@ export default function HomePage() {
                         className={`rounded-xl p-3 text-xs space-y-1 ${
                           dl.critical
                             ? "bg-[#FEE2E2] text-[#991B1B]"
-                            : "bg-[#F8FAFC] dark:bg-slate-950 text-[#1E293B] dark:text-slate-200 border border-slate-200 dark:border-slate-800"
+                            : `border ${surfaceSubCard}`
                         }`}
                       >
                         <div className="font-bold flex items-center gap-1.5">
@@ -2411,41 +2727,37 @@ export default function HomePage() {
                     ))}
                   </div>
 
-                  {/* Fragmentos del Syllabus */}
                   <div className="space-y-2.5">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
-                      Syllabus interactivo
-                    </h3>
-                    {currentSubject.syllabusSections.map((sec) => (
+                    <div className="flex items-center justify-between">
+                      <h3 className={`text-xs font-extrabold uppercase tracking-wider ${textSecondary}`}>
+                        Syllabus y archivos analizados (
+                        {activeSubjectSections.length})
+                      </h3>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAppView("profesor");
+                          setProfesorNav("conocimiento");
+                        }}
+                        className="text-[11px] font-bold text-[#4F46E5] dark:text-indigo-400 hover:underline cursor-pointer"
+                      >
+                        + Subir PDF/CSV
+                      </button>
+                    </div>
+                    {activeSubjectSections.map((sec) => (
                       <div
                         key={sec.id}
-                        className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-3 space-y-1"
+                        className={`rounded-xl border p-3 space-y-1 ${surfaceSubCard}`}
                       >
                         <span className="inline-block rounded bg-[#CCFBF1] text-[#115E59] px-2 py-0.5 text-[11px] font-bold">
                           {sec.section}
                         </span>
-                        <p className="text-xs font-bold">{sec.title}</p>
-                        <p className="text-[11.5px] text-[#475569] dark:text-slate-400 leading-relaxed">
+                        <p className={`text-xs font-bold ${textPrimary}`}>
+                          {sec.title}
+                        </p>
+                        <p className={`text-[11.5px] leading-relaxed line-clamp-3 ${textSecondary}`}>
                           {sec.snippet}
                         </p>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Material descargable */}
-                  <div className="space-y-2">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
-                      Material del curso
-                    </h3>
-                    {currentSubject.materials.map((mat) => (
-                      <div
-                        key={mat.id}
-                        className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 flex items-center justify-between text-xs"
-                      >
-                        <span className="font-medium">{mat.title}</span>
-                        <span className="rounded bg-[#EEF2FF] text-[#3730A3] px-2 py-0.5 font-bold">
-                          {mat.type}
-                        </span>
                       </div>
                     ))}
                   </div>
@@ -2462,10 +2774,10 @@ export default function HomePage() {
           <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
             <header className="flex items-center justify-between">
               <div>
-                <h1 className="text-[28px] leading-tight font-bold">
+                <h1 className={`text-[28px] leading-tight font-bold ${textPrimary}`}>
                   Administración de docentes y alertas
                 </h1>
-                <p className="text-sm text-[#475569] dark:text-slate-400">
+                <p className={`text-sm ${textSecondary}`}>
                   Aprueba solicitudes de acceso docente en Neon Postgres y
                   supervisa las notificaciones enviadas con Resend.
                 </p>
@@ -2473,19 +2785,19 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => fetchAllData()}
-                className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-xs font-bold"
+                className={`min-h-[44px] rounded-xl border px-4 py-2 text-xs font-bold cursor-pointer ${surfaceCard}`}
               >
                 {loadingData ? "Actualizando..." : "Refrescar datos"}
               </button>
             </header>
 
-            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
-              <h2 className="text-base font-bold mb-4">
+            <section className={`rounded-2xl border p-6 ${surfaceCard}`}>
+              <h2 className={`text-base font-bold mb-4 ${textPrimary}`}>
                 Solicitudes de docentes ({teachers.length})
               </h2>
 
               {teachers.length === 0 ? (
-                <p className="text-sm text-[#475569] py-4">
+                <p className={`text-sm py-4 ${textSecondary}`}>
                   No hay docentes registrados todavía. Puedes registrar uno en{" "}
                   <strong>Base de conocimiento</strong>.
                 </p>
@@ -2493,7 +2805,7 @@ export default function HomePage() {
                 <div className="overflow-x-auto">
                   <table className="w-full text-left text-sm border-collapse">
                     <thead>
-                      <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-extrabold uppercase text-[#475569]">
+                      <tr className={`border-b border-slate-200 dark:border-slate-700 text-xs font-extrabold uppercase ${textSecondary}`}>
                         <th className="p-3">Docente</th>
                         <th className="p-3">Correo</th>
                         <th className="p-3">Asignatura</th>
@@ -2506,11 +2818,13 @@ export default function HomePage() {
                       {teachers.map((t) => (
                         <tr
                           key={t.id}
-                          className="border-b border-slate-200 dark:border-slate-800"
+                          className="border-b border-slate-200 dark:border-slate-700"
                         >
-                          <td className="p-3 font-bold">{t.name}</td>
-                          <td className="p-3">{t.email}</td>
-                          <td className="p-3">{t.course}</td>
+                          <td className={`p-3 font-bold ${textPrimary}`}>
+                            {t.name}
+                          </td>
+                          <td className={`p-3 ${textPrimary}`}>{t.email}</td>
+                          <td className={`p-3 ${textPrimary}`}>{t.course}</td>
                           <td className="p-3">
                             <code className="rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-1 font-mono text-xs font-bold">
                               {t.accessCode}
@@ -2540,7 +2854,7 @@ export default function HomePage() {
                                 handleUpdateTeacherStatus(t.id, "approved")
                               }
                               disabled={t.status === "approved"}
-                              className="min-h-[38px] rounded-xl bg-[#22C55E] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+                              className="min-h-[38px] rounded-xl bg-[#22C55E] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40 cursor-pointer"
                             >
                               Aceptar
                             </button>
@@ -2550,7 +2864,7 @@ export default function HomePage() {
                                 handleUpdateTeacherStatus(t.id, "rejected")
                               }
                               disabled={t.status === "rejected"}
-                              className="min-h-[38px] rounded-xl bg-[#EF4444] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+                              className="min-h-[38px] rounded-xl bg-[#EF4444] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40 cursor-pointer"
                             >
                               Rechazar
                             </button>
