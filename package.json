@@ -9,9 +9,14 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@neon/config": "^1.9.3",
+    "@neon/env": "^1.6.4",
+    "@neondatabase/serverless": "^1.2.0",
     "next": "16.4.3",
+    "ollama": "^0.6.4",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "resend": "^6.34.1"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
