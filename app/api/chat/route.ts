@@ -3,6 +3,7 @@ import {
   addEscalationRecord,
   getContentsByTeacher,
   getTeacherByCode,
+  getTeacherByCourse,
   getTeacherById,
   type CourseContent,
   type Teacher,
@@ -17,6 +18,8 @@ export async function POST(request: NextRequest) {
       .trim()
       .toUpperCase();
     const teacherId = String(body.teacherId ?? "").trim();
+    const teacherEmailParam = String(body.teacherEmail ?? "").trim();
+    const teacherNameParam = String(body.teacherName ?? "").trim();
     const courseName = String(body.courseName ?? "").trim() || "Cálculo II";
     const studentName = String(body.studentName ?? "").trim() || "Estudiante";
     const studentEmail =
@@ -45,36 +48,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Look up registered teacher by accessCode -> teacherId -> courseName in Neon Postgres
     const dbTeacher = accessCode
       ? await getTeacherByCode(accessCode)
       : teacherId
         ? await getTeacherById(teacherId)
-        : null;
-
-    if ((accessCode || teacherId) && !dbTeacher && extraContents.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "Código de docente inválido. Ingresa un código válido compartido por tu docente.",
-        },
-        { status: 404 }
-      );
-    }
-
-    if (dbTeacher && dbTeacher.status !== "approved" && extraContents.length === 0) {
-      return NextResponse.json(
-        {
-          error:
-            "El docente de este código aún no ha sido aprobado por el Admin.",
-        },
-        { status: 403 }
-      );
-    }
+        : await getTeacherByCourse(courseName);
 
     const effectiveTeacher: Teacher = dbTeacher ?? {
       id: "local-teacher",
-      name: "Profesor del Curso",
-      email: process.env.PROFESSOR_EMAIL || "profesor@universidad.edu",
+      name: teacherNameParam || "Profesor del Curso",
+      email:
+        teacherEmailParam ||
+        process.env.PROFESSOR_EMAIL ||
+        "profesor@universidad.edu",
       course: courseName,
       accessCode: "LOCAL",
       status: "approved",
@@ -111,6 +98,7 @@ export async function POST(request: NextRequest) {
         ticketCreated: true,
         answer: "No encuentro esto en el material del curso.",
         escalatedTo: effectiveTeacher.email,
+        teacherName: effectiveTeacher.name,
         emailSent: emailResult.sent,
         emailId: emailResult.emailId,
         emailError: emailResult.error,
@@ -143,7 +131,7 @@ export async function POST(request: NextRequest) {
         needsTicketConfirmation: true,
         answer: "No encuentro esto en el material del curso.",
         draftQuestion: question,
-        draftContext: `Asignatura: ${effectiveTeacher.course} (${effectiveTeacher.name}) · La consulta no aparece en el syllabus ni en los ${combinedContents.length} archivos/materiales cargados.`,
+        draftContext: `Asignatura: ${effectiveTeacher.course} (${effectiveTeacher.name} · ${effectiveTeacher.email}) · La consulta no aparece en el syllabus ni en los ${combinedContents.length} archivos/materiales cargados.`,
       });
     }
 
@@ -175,6 +163,7 @@ export async function POST(request: NextRequest) {
       answered: false,
       answer: "No encuentro esto en el material del curso.",
       escalatedTo: effectiveTeacher.email,
+      teacherName: effectiveTeacher.name,
       emailSent: emailResult.sent,
       emailId: emailResult.emailId,
       emailError: emailResult.error,

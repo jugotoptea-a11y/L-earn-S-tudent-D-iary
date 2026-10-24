@@ -337,6 +337,34 @@ export async function getTeacherByCode(
   return rows.length > 0 ? mapTeacherRow(rows[0]) : null;
 }
 
+export async function getTeacherByCourse(
+  courseName: string
+): Promise<Teacher | null> {
+  await ensureSchema();
+  const sql = getPooledSql();
+  const clean = courseName.trim().toLowerCase();
+
+  if (clean) {
+    const exactRows = await sql`
+      SELECT * FROM teachers
+      WHERE LOWER(TRIM(course)) = ${clean}
+      ORDER BY (status = 'approved') DESC, created_at DESC
+      LIMIT 1
+    `;
+    if (exactRows.length > 0) {
+      return mapTeacherRow(exactRows[0]);
+    }
+  }
+
+  const fallbackRows = await sql`
+    SELECT * FROM teachers
+    WHERE status <> 'rejected'
+    ORDER BY (status = 'approved') DESC, created_at DESC
+    LIMIT 1
+  `;
+  return fallbackRows.length > 0 ? mapTeacherRow(fallbackRows[0]) : null;
+}
+
 export async function addCourseContent(params: {
   teacherId: string;
   category: ContentCategory;
@@ -349,11 +377,6 @@ export async function addCourseContent(params: {
   const teacher = await getTeacherById(params.teacherId);
   if (!teacher) {
     throw new Error("Docente no encontrado.");
-  }
-  if (teacher.status !== "approved") {
-    throw new Error(
-      "El docente aún no ha sido aceptado por el Administrador."
-    );
   }
 
   const id = `c_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
@@ -479,7 +502,7 @@ export async function resolveEscalationRecords(params: {
   let kbContent: CourseContent | undefined;
   if (params.addToKb && params.teacherId) {
     const teacher = await getTeacherById(params.teacherId);
-    if (teacher && teacher.status === "approved") {
+    if (teacher) {
       kbContent = await addCourseContent({
         teacherId: teacher.id,
         category: "Información general",
