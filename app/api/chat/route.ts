@@ -4,6 +4,8 @@ import {
   getContentsByTeacher,
   getTeacherByCode,
   getTeacherById,
+  type CourseContent,
+  type Teacher,
 } from "@/src/knowledge/db";
 import { askGemmaWithContents } from "@/src/chatbot/ollama";
 import { sendEscalationEmailToTeacher } from "@/src/email/resend";
@@ -15,20 +17,41 @@ export async function POST(request: NextRequest) {
       .trim()
       .toUpperCase();
     const teacherId = String(body.teacherId ?? "").trim();
+    const courseName = String(body.courseName ?? "").trim() || "Cálculo II";
     const studentName = String(body.studentName ?? "").trim() || "Estudiante";
     const studentEmail =
       String(body.studentEmail ?? "").trim() || "estudiante@curso.edu";
     const question = String(body.question ?? "").trim();
     const action = String(body.action ?? "ask").trim();
     const deferEscalation = Boolean(body.deferEscalation);
+    const extraContents: CourseContent[] = Array.isArray(body.extraContents)
+      ? body.extraContents.map((c: Record<string, unknown>, idx: number) => ({
+          id: String(c.id ?? `extra_${idx}`),
+          teacherId: String(c.teacherId ?? "local"),
+          teacherEmail: String(c.teacherEmail ?? "profesor@curso.edu"),
+          teacherName: String(c.teacherName ?? "Profesor"),
+          category:
+            (String(c.category ?? "Información general") as CourseContent["category"]),
+          title: String(c.title ?? `Archivo #${idx + 1}`),
+          content: String(c.content ?? ""),
+          createdAt: new Date().toISOString(),
+        }))
+      : [];
 
-    const teacher = accessCode
+    if (!question) {
+      return NextResponse.json(
+        { error: "Escribe una pregunta para consultar." },
+        { status: 400 }
+      );
+    }
+
+    const dbTeacher = accessCode
       ? await getTeacherByCode(accessCode)
       : teacherId
         ? await getTeacherById(teacherId)
         : null;
 
-    if (!teacher) {
+    if ((accessCode || teacherId) && !dbTeacher && extraContents.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -38,7 +61,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (teacher.status !== "approved") {
+    if (dbTeacher && dbTeacher.status !== "approved" && extraContents.length === 0) {
       return NextResponse.json(
         {
           error:
@@ -48,41 +71,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!question) {
-      return NextResponse.json(
-        { error: "Escribe una pregunta para consultar." },
-        { status: 400 }
-      );
-    }
+    const effectiveTeacher: Teacher = dbTeacher ?? {
+      id: "local-teacher",
+      name: "Profesor del Curso",
+      email: process.env.PROFESSOR_EMAIL || "profesor@universidad.edu",
+      course: courseName,
+      accessCode: "LOCAL",
+      status: "approved",
+      createdAt: new Date().toISOString(),
+    };
 
     // Explicit ticket submission from the student's editable draft
     if (action === "send_ticket") {
       const emailResult = await sendEscalationEmailToTeacher({
-        teacherEmail: teacher.email,
-        teacherName: teacher.name,
-        courseName: teacher.course,
+        teacherEmail: effectiveTeacher.email,
+        teacherName: effectiveTeacher.name,
+        courseName: effectiveTeacher.course,
         studentName,
         studentEmail,
         question,
       });
 
-      const escalation = await addEscalationRecord({
-        teacherId: teacher.id,
-        teacherName: teacher.name,
-        teacherEmail: teacher.email,
-        studentName,
-        studentEmail,
-        question,
-        emailSent: emailResult.sent,
-        emailId: emailResult.emailId,
-        emailError: emailResult.error,
-      });
+      const escalation = dbTeacher
+        ? await addEscalationRecord({
+            teacherId: dbTeacher.id,
+            teacherName: dbTeacher.name,
+            teacherEmail: dbTeacher.email,
+            studentName,
+            studentEmail,
+            question,
+            emailSent: emailResult.sent,
+            emailId: emailResult.emailId,
+            emailError: emailResult.error,
+          })
+        : undefined;
 
       return NextResponse.json({
         answered: false,
         ticketCreated: true,
         answer: "No encuentro esto en el material del curso.",
-        escalatedTo: teacher.email,
+        escalatedTo: effectiveTeacher.email,
         emailSent: emailResult.sent,
         emailId: emailResult.emailId,
         emailError: emailResult.error,
@@ -90,10 +118,12 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const contents = await getContentsByTeacher(teacher.id);
+    const dbContents = dbTeacher ? await getContentsByTeacher(dbTeacher.id) : [];
+    const combinedContents = [...extraContents, ...dbContents];
+
     const gemmaResult = await askGemmaWithContents({
-      teacher,
-      contents,
+      teacher: effectiveTeacher,
+      contents: combinedContents,
       question,
     });
 
@@ -113,36 +143,38 @@ export async function POST(request: NextRequest) {
         needsTicketConfirmation: true,
         answer: "No encuentro esto en el material del curso.",
         draftQuestion: question,
-        draftContext: `Asignatura: ${teacher.course} (${teacher.name}) · La consulta no aparece en el syllabus ni en los ${contents.length} materiales cargados.`,
+        draftContext: `Asignatura: ${effectiveTeacher.course} (${effectiveTeacher.name}) · La consulta no aparece en el syllabus ni en los ${combinedContents.length} archivos/materiales cargados.`,
       });
     }
 
     // Gemma 4 returned NO_SE: escalate via Resend to the teacher in question
     const emailResult = await sendEscalationEmailToTeacher({
-      teacherEmail: teacher.email,
-      teacherName: teacher.name,
-      courseName: teacher.course,
+      teacherEmail: effectiveTeacher.email,
+      teacherName: effectiveTeacher.name,
+      courseName: effectiveTeacher.course,
       studentName,
       studentEmail,
       question,
     });
 
-    const escalation = await addEscalationRecord({
-      teacherId: teacher.id,
-      teacherName: teacher.name,
-      teacherEmail: teacher.email,
-      studentName,
-      studentEmail,
-      question,
-      emailSent: emailResult.sent,
-      emailId: emailResult.emailId,
-      emailError: emailResult.error,
-    });
+    const escalation = dbTeacher
+      ? await addEscalationRecord({
+          teacherId: dbTeacher.id,
+          teacherName: dbTeacher.name,
+          teacherEmail: dbTeacher.email,
+          studentName,
+          studentEmail,
+          question,
+          emailSent: emailResult.sent,
+          emailId: emailResult.emailId,
+          emailError: emailResult.error,
+        })
+      : undefined;
 
     return NextResponse.json({
       answered: false,
       answer: "No encuentro esto en el material del curso.",
-      escalatedTo: teacher.email,
+      escalatedTo: effectiveTeacher.email,
       emailSent: emailResult.sent,
       emailId: emailResult.emailId,
       emailError: emailResult.error,
