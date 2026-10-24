@@ -349,14 +349,92 @@ export default function HomePage() {
     return `${prefix}-${seqRef.current}`;
   }
 
+  // Database state from Neon Postgres
+  const [teachers, setTeachers] = useState<Teacher[]>([]);
+  const [contents, setContents] = useState<CourseContent[]>([]);
+  const [escalations, setEscalations] = useState<EscalationRecord[]>([]);
+  const [loadingData, setLoadingData] = useState(false);
+
+  // Merge preset subjects with any custom subjects registered by teachers in Neon Postgres
+  const availableSubjects = useMemo<SubjectConfig[]>(() => {
+    const dynamicSubjects: SubjectConfig[] = [...SUBJECTS];
+    const palette = ["#4F46E5", "#0EA5E9", "#A855F7", "#14B8A6", "#F59E0B"];
+
+    for (const t of teachers) {
+      const courseClean = t.course.trim();
+      if (!courseClean) continue;
+      const existingIdx = dynamicSubjects.findIndex(
+        (s) => s.name.toLowerCase() === courseClean.toLowerCase()
+      );
+      if (existingIdx >= 0) {
+        dynamicSubjects[existingIdx] = {
+          ...dynamicSubjects[existingIdx],
+          teacherName: t.name || dynamicSubjects[existingIdx].teacherName,
+          code: t.accessCode || dynamicSubjects[existingIdx].code,
+        };
+      } else {
+        const slug =
+          courseClean
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/[^a-z0-9]+/g, "-") || `subj-${t.id}`;
+        dynamicSubjects.push({
+          id: slug,
+          name: courseClean,
+          accentHex: palette[dynamicSubjects.length % palette.length],
+          teacherName: t.name,
+          code: t.accessCode,
+          syllabusSections: [],
+          deadlines: [
+            {
+              id: `dl-${t.id}`,
+              title: `Próxima entrega de ${courseClean}`,
+              date: "Ver calendario del curso",
+            },
+          ],
+          materials: [],
+        });
+      }
+    }
+    return dynamicSubjects;
+  }, [teachers]);
+
   // Selected subject for accent color & context
   const [selectedSubjectId, setSelectedSubjectId] =
     useState<string>("calculo-ii");
   const currentSubject = useMemo(
     () =>
-      SUBJECTS.find((s) => s.id === selectedSubjectId) || SUBJECTS[0],
-    [selectedSubjectId]
+      availableSubjects.find((s) => s.id === selectedSubjectId) ||
+      availableSubjects[0],
+    [availableSubjects, selectedSubjectId]
   );
+
+  // Find the registered teacher for the currently selected subject
+  const matchedSubjectTeacher = useMemo<Teacher | ConnectedTeacherInfo | null>(() => {
+    if (
+      connectedTeacher &&
+      connectedTeacher.course.toLowerCase() ===
+        currentSubject.name.toLowerCase()
+    ) {
+      return connectedTeacher;
+    }
+    if (
+      loggedTeacher &&
+      loggedTeacher.course.toLowerCase() === currentSubject.name.toLowerCase()
+    ) {
+      return loggedTeacher;
+    }
+    const exactMatch = teachers.find(
+      (t) =>
+        t.course.trim().toLowerCase() ===
+        currentSubject.name.trim().toLowerCase()
+    );
+    if (exactMatch) return exactMatch;
+    if (connectedTeacher) return connectedTeacher;
+    if (loggedTeacher) return loggedTeacher;
+    return teachers[0] || null;
+  }, [connectedTeacher, loggedTeacher, teachers, currentSubject.name]);
 
   // Uploaded & AI-analyzed documents per subject (supports multiple PDFs, CSVs, TXTs)
   const [uploadedSectionsBySubject, setUploadedSectionsBySubject] = useState<
@@ -374,12 +452,6 @@ export default function HomePage() {
   const [aiAnalysisReport, setAiAnalysisReport] =
     useState<FileAnalysisReport | null>(null);
   const [fileUploadError, setFileUploadError] = useState("");
-
-  // Database state from Neon Postgres
-  const [teachers, setTeachers] = useState<Teacher[]>([]);
-  const [contents, setContents] = useState<CourseContent[]>([]);
-  const [escalations, setEscalations] = useState<EscalationRecord[]>([]);
-  const [loadingData, setLoadingData] = useState(false);
 
   // Professor Tickets state (starts with the exact mockup tickets from reference image)
   const [localTickets, setLocalTickets] = useState<GroupedTicket[]>(
@@ -1002,8 +1074,12 @@ export default function HomePage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accessCode: connectedTeacher?.accessCode || "",
-          courseName: connectedTeacher?.course || currentSubject.name,
+          accessCode: matchedSubjectTeacher?.accessCode || "",
+          teacherId: matchedSubjectTeacher?.id || "",
+          teacherEmail: matchedSubjectTeacher?.email || "",
+          teacherName:
+            matchedSubjectTeacher?.name || currentSubject.teacherName,
+          courseName: matchedSubjectTeacher?.course || currentSubject.name,
           studentName,
           studentEmail,
           question: currentQ,
@@ -1093,52 +1169,64 @@ export default function HomePage() {
     let emailSent = false;
     let emailId: string | undefined;
     let emailError: string | undefined;
-    let escalatedTo = connectedTeacher?.email || "profesor@universidad.edu";
+    let escalatedTo =
+      matchedSubjectTeacher?.email ||
+      connectedTeacher?.email ||
+      loggedTeacher?.email ||
+      "profesor@universidad.edu";
 
-    if (connectedTeacher) {
-      try {
-        const res = await fetch("/api/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            action: "send_ticket",
-            accessCode: connectedTeacher.accessCode,
-            studentName,
-            studentEmail,
-            question: finalQuestion,
-          }),
-        });
-        const data = await res.json();
-        emailSent = Boolean(data.emailSent);
-        emailId = data.emailId;
-        emailError = data.emailError;
-        escalatedTo = data.escalatedTo || escalatedTo;
-        await fetchAllData();
-      } catch {
-        emailError = "Registrado en la bandeja de tickets del profesor.";
-      }
-    } else {
-      const newTicketId = makeId("local-ticket");
-      setLocalTickets((prev) => [
-        {
-          id: newTicketId,
-          course: currentSubject.name,
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: "send_ticket",
+          accessCode: matchedSubjectTeacher?.accessCode || "",
+          teacherId: matchedSubjectTeacher?.id || "",
+          teacherEmail: matchedSubjectTeacher?.email || "",
+          teacherName:
+            matchedSubjectTeacher?.name || currentSubject.teacherName,
+          courseName: matchedSubjectTeacher?.course || currentSubject.name,
+          studentName,
+          studentEmail,
           question: finalQuestion,
-          status: /parcial|examen|urgente|hoy/i.test(finalQuestion)
-            ? "urgent"
-            : "pending",
-          statusLabel: /parcial|examen|urgente|hoy/i.test(finalQuestion)
-            ? "Urgente · parcial cerca"
-            : "Pendiente",
-          metaLabel: "Agrupa N preguntas similares",
-          similarCount: 1,
-          assistantContext: `Contexto del asistente: ${finalContext}`,
-          addedToKb: true,
-          escalationIds: [],
-          studentEmails: [studentEmail],
-        },
-        ...prev,
-      ]);
+        }),
+      });
+      const data = await res.json();
+      emailSent = Boolean(data.emailSent);
+      emailId = data.emailId;
+      emailError = data.emailError;
+      if (data.escalatedTo) {
+        escalatedTo = data.escalatedTo;
+      }
+
+      if (!data.escalation) {
+        const newTicketId = makeId("local-ticket");
+        setLocalTickets((prev) => [
+          {
+            id: newTicketId,
+            course: matchedSubjectTeacher?.course || currentSubject.name,
+            question: finalQuestion,
+            status: /parcial|examen|urgente|hoy/i.test(finalQuestion)
+              ? "urgent"
+              : "pending",
+            statusLabel: /parcial|examen|urgente|hoy/i.test(finalQuestion)
+              ? "Urgente · parcial cerca"
+              : "Pendiente",
+            metaLabel: "Agrupa N preguntas similares",
+            similarCount: 1,
+            assistantContext: `Contexto del asistente: ${finalContext}`,
+            addedToKb: true,
+            escalationIds: [],
+            studentEmails: [studentEmail],
+          },
+          ...prev,
+        ]);
+      }
+
+      await fetchAllData();
+    } catch {
+      emailError = "Registrado en la bandeja de tickets del profesor.";
     }
 
     const trackerId = makeId("st");
@@ -2266,7 +2354,7 @@ export default function HomePage() {
                   aria-label="Selector de asignatura"
                   className="flex flex-wrap items-center gap-2"
                 >
-                  {SUBJECTS.map((subj) => {
+                  {availableSubjects.map((subj) => {
                     const active = subj.id === selectedSubjectId;
                     return (
                       <button
@@ -2505,12 +2593,16 @@ export default function HomePage() {
 
                           {msg.isTicketDraft && !msg.ticketSent && (
                             <div className={`mt-3.5 rounded-xl border p-4 space-y-3 ${surfaceSubCard}`}>
-                              <div className="flex items-center justify-between">
+                              <div className="flex flex-wrap items-center justify-between gap-1">
                                 <span className="text-xs font-extrabold uppercase tracking-wider text-[#4F46E5] dark:text-indigo-300">
                                   Borrador de ticket para el profesor
                                 </span>
                                 <span className={`text-[11px] font-semibold ${textSecondary}`}>
-                                  Editable antes de enviar
+                                  Destinatario:{" "}
+                                  <strong>
+                                    {matchedSubjectTeacher?.email ||
+                                      "Registra un correo docente en Base de conocimiento"}
+                                  </strong>
                                 </span>
                               </div>
 
@@ -2553,7 +2645,9 @@ export default function HomePage() {
                                 onClick={() => handleSendTicketToProfessor(msg)}
                                 className="w-full min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold text-xs py-2.5 px-4 transition-colors cursor-pointer"
                               >
-                                Enviar al profesor
+                                {matchedSubjectTeacher?.email
+                                  ? `Enviar al profesor (${matchedSubjectTeacher.email})`
+                                  : "Enviar al profesor"}
                               </button>
                             </div>
                           )}
