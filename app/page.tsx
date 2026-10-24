@@ -1,14 +1,178 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 
-type RoleTab = "estudiante" | "docente" | "admin";
+type AppView = "profesor" | "estudiante" | "admin";
+type ProfesorNav = "bandeja" | "conocimiento" | "metricas";
 type TeacherStatus = "pending" | "approved" | "rejected";
+type TicketStatus = "urgent" | "pending" | "resolved";
+type TicketTimelineStep = "enviado" | "en_revision" | "respondido";
 type ContentCategory =
   | "Plataformas"
   | "Tareas"
   | "Notas"
   | "Información general";
+
+interface SubjectConfig {
+  id: string;
+  name: string;
+  accentHex: string;
+  teacherName: string;
+  code: string;
+  syllabusSections: {
+    id: string;
+    section: string;
+    title: string;
+    snippet: string;
+  }[];
+  deadlines: {
+    id: string;
+    title: string;
+    date: string;
+    critical?: boolean;
+  }[];
+  materials: {
+    id: string;
+    title: string;
+    type: string;
+  }[];
+}
+
+const SUBJECTS: SubjectConfig[] = [
+  {
+    id: "calculo-ii",
+    name: "Cálculo II",
+    accentHex: "#4F46E5",
+    teacherName: "Prof. Martín Gómez",
+    code: "CALC-202",
+    syllabusSections: [
+      {
+        id: "syl-1",
+        section: "Syllabus · Sección 2.1",
+        title: "Temario del Segundo Parcial",
+        snippet:
+          "El segundo parcial evalúa técnicas de integración (por partes, fracciones parciales), integrales impropias y aplicaciones de la integral definida (áreas y volúmenes de revolución).",
+      },
+      {
+        id: "syl-2",
+        section: "Syllabus · Sección 3.2",
+        title: "Calendario de Evaluaciones y Ponderación",
+        snippet:
+          "Primer parcial: 25% · Segundo parcial: 25% (viernes 14 de noviembre, 10:00 a.m., Aula Magna) · Talleres prácticos (4 entregas): 20% · Examen final acumulativo: 30%.",
+      },
+      {
+        id: "syl-3",
+        section: "Syllabus · Sección 4.1",
+        title: "Entrega de Talleres",
+        snippet:
+          "Todos los talleres se entregan en formato PDF a través de la plataforma del curso antes de las 23:59 del día indicado. El Taller 3 vence este viernes.",
+      },
+    ],
+    deadlines: [
+      {
+        id: "dl-1",
+        title: "Segundo Parcial Presencial",
+        date: "En 48 horas · Viernes 10:00",
+        critical: true,
+      },
+      {
+        id: "dl-2",
+        title: "Entrega Taller 3 (Integrales impropias)",
+        date: "Viernes · 23:59",
+      },
+      {
+        id: "dl-3",
+        title: "Quiz de lectura: Series de Taylor",
+        date: "Próximo miércoles · 18:00",
+      },
+    ],
+    materials: [
+      { id: "m-1", title: "Guía de ejercicios resueltos — Unidad 3", type: "PDF" },
+      { id: "m-2", title: "Formulario oficial de integrales", type: "PDF" },
+      { id: "m-3", title: "Plantilla LaTeX para entrega de talleres", type: "ZIP" },
+    ],
+  },
+  {
+    id: "fisica-i",
+    name: "Física I",
+    accentHex: "#0EA5E9",
+    teacherName: "Prof. Laura Méndez",
+    code: "FISI-101",
+    syllabusSections: [
+      {
+        id: "fis-1",
+        section: "Syllabus · Sección 1.4",
+        title: "Criterios de Calificación y Laboratorio",
+        snippet:
+          "Parciales teóricos: 50% · Informes de laboratorio quincenales: 30% · Proyecto experimental final: 20%. Es requisito aprobar el componente práctico.",
+      },
+      {
+        id: "fis-2",
+        section: "Syllabus · Sección 2.3",
+        title: "Próximo Examen de Cinemática y Dinámica",
+        snippet:
+          "El examen abarca leyes de Newton, rozamiento, trabajo y conservación de la energía mecánica. Se permite formulario de una carilla escrito a mano.",
+      },
+    ],
+    deadlines: [
+      {
+        id: "fdl-1",
+        title: "Informe Laboratorio 4: Conservación de Energía",
+        date: "Mañana · 23:59",
+        critical: true,
+      },
+      {
+        id: "fdl-2",
+        title: "Segundo Parcial de Dinámica",
+        date: "Jueves 20 nov · 08:00",
+      },
+    ],
+    materials: [
+      { id: "fm-1", title: "Guía de incertidumbre y propagación de errores", type: "PDF" },
+      { id: "fm-2", title: "Datos experimentales — Péndulo balístico", type: "CSV" },
+    ],
+  },
+  {
+    id: "programacion",
+    name: "Programación",
+    accentHex: "#A855F7",
+    teacherName: "Prof. Andrés Silva",
+    code: "PROG-105",
+    syllabusSections: [
+      {
+        id: "prg-1",
+        section: "Syllabus · Sección 3.1",
+        title: "Evaluación Continua y Entregas en Git",
+        snippet:
+          "Laboratorios semanales automatizados: 35% · Parcial práctico en sala: 30% · Proyecto final en equipo: 35%. Todas las entregas deben compilar sin errores.",
+      },
+      {
+        id: "prg-2",
+        section: "Syllabus · Sección 3.4",
+        title: "Contenido del Parcial Práctico",
+        snippet:
+          "Recursividad, estructuras de datos lineales (listas enlazadas, pilas y colas) y análisis básico de complejidad algorítmica O(n).",
+      },
+    ],
+    deadlines: [
+      {
+        id: "pdl-1",
+        title: "Entrega Hito 2 del Proyecto en GitHub",
+        date: "Hoy · 23:59",
+        critical: true,
+      },
+      {
+        id: "pdl-2",
+        title: "Parcial Práctico en Laboratorio",
+        date: "Lunes 17 nov · 14:00",
+      },
+    ],
+    materials: [
+      { id: "pm-1", title: " Casos de prueba públicos — Taller Recursión", type: "JSON" },
+      { id: "pm-2", title: "Guía de estilo y buenas prácticas", type: "MD" },
+    ],
+  },
+];
 
 interface Teacher {
   id: string;
@@ -51,30 +215,142 @@ interface EscalationRecord {
   emailSent: boolean;
   emailId?: string;
   emailError?: string;
+  status?: TicketStatus;
+  teacherAnswer?: string;
+  addedToKb?: boolean;
+  createdAt: string;
+}
+
+interface GroupedTicket {
+  id: string;
+  course: string;
+  question: string;
+  status: TicketStatus;
+  statusLabel: string;
+  metaLabel: string;
+  similarCount?: number;
+  assistantContext: string;
+  teacherAnswer?: string;
+  addedToKb: boolean;
+  escalationIds: string[];
+  studentEmails: string[];
+}
+
+interface StudentTicketTracker {
+  id: string;
+  course: string;
+  question: string;
+  context: string;
+  step: TicketTimelineStep;
+  teacherAnswer?: string;
   createdAt: string;
 }
 
 interface ChatMessage {
   id: string;
-  sender: "student" | "bot";
+  sender: "student" | "bot" | "professor";
   text: string;
   answered?: boolean;
+  sourceLabel?: string;
+  sourceSnippet?: string;
+  confidence?: "Basada en el syllabus" | "Respuesta inferida";
+  feedback?: "up" | "down";
+  isTicketDraft?: boolean;
+  draftQuestion?: string;
+  draftContext?: string;
+  ticketSent?: boolean;
+  ticketId?: string;
   escalatedTo?: string;
   emailSent?: boolean;
   emailId?: string;
   emailError?: string;
 }
 
-export default function HomePage() {
-  const [activeRole, setActiveRole] = useState<RoleTab>("docente");
+const INITIAL_MOCKUP_TICKETS: GroupedTicket[] = [
+  {
+    id: "mock-ticket-1",
+    course: "Cálculo II",
+    question: "¿Se permite calculadora gráfica en el segundo parcial?",
+    status: "urgent",
+    statusLabel: "Urgente · parcial cerca",
+    metaLabel: "Agrupa N preguntas similares",
+    similarCount: 4,
+    assistantContext:
+      "Contexto del asistente: la política de calculadoras no aparece en el syllabus ni en el material cargado.",
+    addedToKb: true,
+    escalationIds: [],
+    studentEmails: [],
+  },
+  {
+    id: "mock-ticket-2",
+    course: "Cálculo II",
+    question: "¿Hay tutoría antes del examen final?",
+    status: "pending",
+    statusLabel: "Pendiente",
+    metaLabel: "Agrupa N preguntas similares",
+    similarCount: 3,
+    assistantContext:
+      "Contexto del asistente: las fechas de tutorías adicionales previas al examen final no figuran en el calendario del curso.",
+    addedToKb: true,
+    escalationIds: [],
+    studentEmails: [],
+  },
+  {
+    id: "mock-ticket-3",
+    course: "Cálculo II",
+    question: "¿Cómo se entrega el taller 3?",
+    status: "resolved",
+    statusLabel: "Resuelto",
+    metaLabel: "Guardado en la base de conocimiento",
+    similarCount: 5,
+    assistantContext:
+      "Contexto del asistente: esta duda fue respondida por el profesor y añadida a la base de conocimiento para futuras consultas.",
+    teacherAnswer:
+      "El taller 3 se entrega únicamente en formato PDF mediante la plataforma del curso hasta el viernes a las 23:59. Recuerden incluir el procedimiento completo.",
+    addedToKb: true,
+    escalationIds: [],
+    studentEmails: [],
+  },
+];
 
-  // Global data from Neon Postgres
+export default function HomePage() {
+  // Navigation & Theme
+  const [appView, setAppView] = useState<AppView>("profesor");
+  const [profesorNav, setProfesorNav] = useState<ProfesorNav>("bandeja");
+  const [darkMode, setDarkMode] = useState(false);
+  const seqRef = useRef(1);
+  function makeId(prefix: string) {
+    seqRef.current += 1;
+    return `${prefix}-${seqRef.current}`;
+  }
+
+  // Selected subject for accent color & context
+  const [selectedSubjectId, setSelectedSubjectId] =
+    useState<string>("calculo-ii");
+  const currentSubject = useMemo(
+    () =>
+      SUBJECTS.find((s) => s.id === selectedSubjectId) || SUBJECTS[0],
+    [selectedSubjectId]
+  );
+
+  // Database state from Neon Postgres
   const [teachers, setTeachers] = useState<Teacher[]>([]);
   const [contents, setContents] = useState<CourseContent[]>([]);
   const [escalations, setEscalations] = useState<EscalationRecord[]>([]);
   const [loadingData, setLoadingData] = useState(false);
 
-  // Docente state
+  // Professor Tickets state (starts with the exact mockup tickets from reference image)
+  const [localTickets, setLocalTickets] = useState<GroupedTicket[]>(
+    INITIAL_MOCKUP_TICKETS
+  );
+  const [selectedTicketId, setSelectedTicketId] =
+    useState<string>("mock-ticket-1");
+  const [replyText, setReplyText] = useState<string>("");
+  const [addToKbChecked, setAddToKbChecked] = useState<boolean>(true);
+  const [replyFeedbackMsg, setReplyFeedbackMsg] = useState<string>("");
+  const [sendingReply, setSendingReply] = useState<boolean>(false);
+
+  // Docente Login & Content Upload state (Base de conocimiento)
   const [docenteEmail, setDocenteEmail] = useState("");
   const [docenteName, setDocenteName] = useState("");
   const [docenteCourse, setDocenteCourse] = useState("");
@@ -83,24 +359,73 @@ export default function HomePage() {
   const [docenteMsg, setDocenteMsg] = useState("");
   const [copiedCode, setCopiedCode] = useState(false);
 
-  // Docente content upload state
-  const [category, setCategory] = useState<ContentCategory>("Plataformas");
+  const [category, setCategory] = useState<ContentCategory>("Información general");
   const [contentTitle, setContentTitle] = useState("");
   const [contentBody, setContentBody] = useState("");
   const [savingContent, setSavingContent] = useState(false);
 
-  // Estudiante state (connects via teacher access code)
+  // Student View state
+  const [studentSidebarOpen, setStudentSidebarOpen] = useState<boolean>(true);
+  const [expandedSourceMsgId, setExpandedSourceMsgId] = useState<string | null>(
+    null
+  );
   const [studentCodeInput, setStudentCodeInput] = useState("");
   const [connectedTeacher, setConnectedTeacher] =
     useState<ConnectedTeacherInfo | null>(null);
   const [studentConnectError, setStudentConnectError] = useState("");
   const [connectingCode, setConnectingCode] = useState(false);
+  const [showCodeModal, setShowCodeModal] = useState(false);
 
-  const [studentName, setStudentName] = useState("");
-  const [studentEmail, setStudentEmail] = useState("");
+  const [studentName, setStudentName] = useState("Ana Pérez");
+  const [studentEmail, setStudentEmail] = useState("ana.perez@universidad.edu");
   const [question, setQuestion] = useState("");
-  const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [askingGemma, setAskingGemma] = useState(false);
+
+  // Student Chat messages per subject + Ticket timeline tracker
+  const [chatBySubject, setChatBySubject] = useState<
+    Record<string, ChatMessage[]>
+  >({
+    "calculo-ii": [
+      {
+        id: "init-q-1",
+        sender: "student",
+        text: "¿Cuándo es el próximo parcial y qué porcentaje vale?",
+      },
+      {
+        id: "init-a-1",
+        sender: "bot",
+        text: "El segundo parcial de Cálculo II es el viernes 14 de noviembre a las 10:00 a.m. en el Aula Magna y tiene un valor del 25% de la nota final.",
+        answered: true,
+        sourceLabel: "Syllabus · Sección 3.2",
+        sourceSnippet:
+          "Primer parcial: 25% · Segundo parcial: 25% (viernes 14 de noviembre, 10:00 a.m., Aula Magna) · Talleres prácticos (4 entregas): 20% · Examen final acumulativo: 30%.",
+        confidence: "Basada en el syllabus",
+      },
+    ],
+    "fisica-i": [],
+    programacion: [],
+  });
+
+  const [studentTickets, setStudentTickets] = useState<StudentTicketTracker[]>([
+    {
+      id: "st-demo-1",
+      course: "Cálculo II",
+      question: "¿Se permite calculadora gráfica en el segundo parcial?",
+      context:
+        "Consultado en el chat de Cálculo II · No figura política de calculadoras en el syllabus.",
+      step: "en_revision",
+      createdAt: "Hace 15 min",
+    },
+  ]);
+
+  useEffect(() => {
+    const root = document.documentElement;
+    if (darkMode) {
+      root.classList.add("dark");
+    } else {
+      root.classList.remove("dark");
+    }
+  }, [darkMode]);
 
   async function fetchAllData(currentTeacherEmail?: string) {
     setLoadingData(true);
@@ -167,6 +492,181 @@ export default function HomePage() {
     };
   }, []);
 
+  // Merge Neon Postgres escalations with the reference mockup tickets grouped by similar question
+  const combinedTickets = useMemo(() => {
+    const relevantEscalations = loggedTeacher
+      ? escalations.filter((e) => e.teacherId === loggedTeacher.id)
+      : escalations;
+
+    const groupedMap = new Map<string, GroupedTicket>();
+
+    for (const esc of relevantEscalations) {
+      const normKey = esc.question.trim().toLowerCase();
+      const existing = groupedMap.get(normKey);
+      if (existing) {
+        existing.similarCount = (existing.similarCount || 1) + 1;
+        existing.escalationIds.push(esc.id);
+        if (!existing.studentEmails.includes(esc.studentEmail)) {
+          existing.studentEmails.push(esc.studentEmail);
+        }
+        if (esc.status === "resolved") {
+          existing.status = "resolved";
+          existing.statusLabel = "Resuelto";
+          existing.metaLabel = esc.addedToKb
+            ? "Guardado en la base de conocimiento"
+            : "Respondido por el docente";
+          existing.teacherAnswer = esc.teacherAnswer;
+        }
+      } else {
+        const isUrgent =
+          esc.status === "urgent" ||
+          /parcial|examen|entrega|hoy|mañana|urgente/i.test(esc.question);
+        const status: TicketStatus =
+          esc.status === "resolved"
+            ? "resolved"
+            : isUrgent
+              ? "urgent"
+              : "pending";
+        groupedMap.set(normKey, {
+          id: `db-${esc.id}`,
+          course: loggedTeacher?.course || currentSubject.name,
+          question: esc.question,
+          status,
+          statusLabel:
+            status === "urgent"
+              ? "Urgente · parcial cerca"
+              : status === "resolved"
+                ? "Resuelto"
+                : "Pendiente",
+          metaLabel:
+            status === "resolved"
+              ? "Guardado en la base de conocimiento"
+              : "Agrupa N preguntas similares",
+          similarCount: 1,
+          assistantContext: `Contexto del asistente: consulta de ${esc.studentName} (${esc.studentEmail}). No aparece en el syllabus ni en el material cargado.`,
+          teacherAnswer: esc.teacherAnswer,
+          addedToKb: esc.addedToKb ?? true,
+          escalationIds: [esc.id],
+          studentEmails: [esc.studentEmail],
+        });
+      }
+    }
+
+    const dbGrouped = Array.from(groupedMap.values());
+    const orderWeight: Record<TicketStatus, number> = {
+      urgent: 0,
+      pending: 1,
+      resolved: 2,
+    };
+
+    const merged = [...localTickets, ...dbGrouped].sort(
+      (a, b) => orderWeight[a.status] - orderWeight[b.status]
+    );
+    return merged;
+  }, [escalations, localTickets, loggedTeacher, currentSubject.name]);
+
+  const selectedTicket = useMemo(
+    () =>
+      combinedTickets.find((t) => t.id === selectedTicketId) ||
+      combinedTickets[0],
+    [combinedTickets, selectedTicketId]
+  );
+
+  function handleSelectTicket(ticket: GroupedTicket) {
+    setSelectedTicketId(ticket.id);
+    setReplyText(ticket.teacherAnswer || "");
+    setAddToKbChecked(ticket.addedToKb);
+    setReplyFeedbackMsg("");
+  }
+
+  async function handleReplyToStudents(e: React.FormEvent) {
+    e.preventDefault();
+    if (!selectedTicket || !replyText.trim()) return;
+
+    setSendingReply(true);
+    setReplyFeedbackMsg("");
+    const cleanReply = replyText.trim();
+
+    try {
+      // If connected to real DB escalations or logged in teacher, persist in Neon Postgres
+      if (selectedTicket.escalationIds.length > 0 || loggedTeacher) {
+        await fetch("/api/teachers", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            escalationIds: selectedTicket.escalationIds,
+            teacherId: loggedTeacher?.id,
+            question: selectedTicket.question,
+            answer: cleanReply,
+            addToKb: addToKbChecked,
+          }),
+        });
+        await fetchAllData(loggedTeacher?.email);
+      }
+
+      // Update local ticket state
+      setLocalTickets((prev) =>
+        prev.map((item) =>
+          item.id === selectedTicket.id
+            ? {
+                ...item,
+                status: "resolved",
+                statusLabel: "Resuelto",
+                metaLabel: addToKbChecked
+                  ? "Guardado en la base de conocimiento"
+                  : "Respondido a los estudiantes",
+                teacherAnswer: cleanReply,
+                addedToKb: addToKbChecked,
+              }
+            : item
+        )
+      );
+
+      // Update student ticket timeline & inject Professor's Amber reply in Student Chat!
+      setStudentTickets((prev) =>
+        prev.map((st) =>
+          st.question.toLowerCase().trim() ===
+          selectedTicket.question.toLowerCase().trim()
+            ? {
+                ...st,
+                step: "respondido",
+                teacherAnswer: cleanReply,
+              }
+            : st
+        )
+      );
+
+      const replyMsgId = makeId("prof-reply");
+      setChatBySubject((prev) => {
+        const currentList = prev[selectedSubjectId] || [];
+        return {
+          ...prev,
+          [selectedSubjectId]: [
+            ...currentList,
+            {
+              id: replyMsgId,
+              sender: "professor",
+              text: cleanReply,
+              sourceLabel: `Respuesta del profesor · ${
+                loggedTeacher?.name || currentSubject.teacherName
+              }`,
+            },
+          ],
+        };
+      });
+
+      setReplyFeedbackMsg(
+        addToKbChecked
+          ? "Respuesta enviada a los estudiantes y añadida a la base de conocimiento."
+          : "Respuesta enviada a todos los estudiantes."
+      );
+    } catch {
+      setReplyFeedbackMsg("Ocurrió un error al enviar la respuesta.");
+    } finally {
+      setSendingReply(false);
+    }
+  }
+
   // --- ADMIN ACTIONS ---
   async function handleUpdateTeacherStatus(
     teacherId: string,
@@ -197,7 +697,7 @@ export default function HomePage() {
         body: JSON.stringify({
           email: docenteEmail,
           name: docenteName,
-          course: docenteCourse,
+          course: docenteCourse || currentSubject.name,
           customCode: docenteCustomCode,
         }),
       });
@@ -246,7 +746,7 @@ export default function HomePage() {
         setContentTitle("");
         setContentBody("");
         setDocenteMsg(
-          "Información guardada en Neon Postgres y disponible para Gemma 4."
+          "Material guardado en la base de conocimiento (Neon Postgres) para Gemma 4."
         );
         await fetchAllData(loggedTeacher.email);
       }
@@ -295,7 +795,7 @@ export default function HomePage() {
         );
       } else {
         setConnectedTeacher(data.teacher);
-        setChatHistory([]);
+        setShowCodeModal(false);
       }
     } catch {
       setStudentConnectError("Error de conexión al validar el código.");
@@ -304,306 +804,785 @@ export default function HomePage() {
     }
   }
 
-  async function handleSendQuestion(e: React.FormEvent) {
-    e.preventDefault();
-    if (!question.trim() || !connectedTeacher) return;
+  function findLocalSyllabusAnswer(q: string): {
+    known: boolean;
+    answer: string;
+    sourceLabel?: string;
+    sourceSnippet?: string;
+    confidence?: "Basada en el syllabus" | "Respuesta inferida";
+  } {
+    const norm = q
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
 
-    const currentQ = question.trim();
+    // Check resolved tickets in knowledge base first
+    const resolvedMatch = combinedTickets.find(
+      (t) =>
+        t.status === "resolved" &&
+        t.addedToKb &&
+        t.teacherAnswer &&
+        norm.includes("calculadora") &&
+        t.question.toLowerCase().includes("calculadora")
+    );
+    if (resolvedMatch && resolvedMatch.teacherAnswer) {
+      return {
+        known: true,
+        answer: resolvedMatch.teacherAnswer,
+        sourceLabel: "Base de conocimiento · Respuesta del profesor",
+        sourceSnippet: resolvedMatch.teacherAnswer,
+        confidence: "Basada en el syllabus",
+      };
+    }
+
+    if (norm.includes("taller 3") || norm.includes("entrega")) {
+      const sec =
+        currentSubject.syllabusSections[2] || currentSubject.syllabusSections[0];
+      return {
+        known: true,
+        answer:
+          "El Taller 3 se entrega en formato PDF a través de la plataforma del curso antes del viernes a las 23:59.",
+        sourceLabel: sec.section,
+        sourceSnippet: sec.snippet,
+        confidence: "Basada en el syllabus",
+      };
+    }
+
+    if (
+      norm.includes("cuando") ||
+      norm.includes("parcial") ||
+      norm.includes("fecha") ||
+      norm.includes("califica") ||
+      norm.includes("porcentaje")
+    ) {
+      if (norm.includes("calculadora")) {
+        return { known: false, answer: "NO_SE" };
+      }
+      const sec =
+        currentSubject.syllabusSections[1] || currentSubject.syllabusSections[0];
+      return {
+        known: true,
+        answer: sec.snippet,
+        sourceLabel: sec.section,
+        sourceSnippet: sec.snippet,
+        confidence: "Basada en el syllabus",
+      };
+    }
+
+    if (norm.includes("entra") || norm.includes("temario") || norm.includes("tema")) {
+      const sec = currentSubject.syllabusSections[0];
+      return {
+        known: true,
+        answer: sec.snippet,
+        sourceLabel: sec.section,
+        sourceSnippet: sec.snippet,
+        confidence: "Basada en el syllabus",
+      };
+    }
+
+    return { known: false, answer: "NO_SE" };
+  }
+
+  async function askQuestionInChat(rawQuestion: string) {
+    const currentQ = rawQuestion.trim();
+    if (!currentQ) return;
+
     const userMsg: ChatMessage = {
-      id: `m_${Date.now()}_u`,
+      id: makeId("u"),
       sender: "student",
       text: currentQ,
     };
-    setChatHistory((prev) => [...prev, userMsg]);
+
+    setChatBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: [...(prev[selectedSubjectId] || []), userMsg],
+    }));
     setQuestion("");
     setAskingGemma(true);
 
     try {
-      const res = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accessCode: connectedTeacher.accessCode,
-          studentName,
-          studentEmail,
-          question: currentQ,
-        }),
-      });
-      const data = await res.json();
+      if (connectedTeacher) {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accessCode: connectedTeacher.accessCode,
+            studentName,
+            studentEmail,
+            question: currentQ,
+            deferEscalation: true,
+          }),
+        });
+        const data = await res.json();
 
-      if (!res.ok) {
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            id: `m_${Date.now()}_err`,
-            sender: "bot",
-            text: data.error || "Ocurrió un error al procesar tu consulta.",
-            answered: false,
-          },
-        ]);
-      } else {
-        setChatHistory((prev) => [
-          ...prev,
-          {
-            id: `m_${Date.now()}_b`,
+        if (res.ok && data.answered) {
+          const botMsg: ChatMessage = {
+            id: makeId("b"),
             sender: "bot",
             text: data.answer,
-            answered: data.answered,
-            escalatedTo: data.escalatedTo,
-            emailSent: data.emailSent,
-            emailId: data.emailId,
-            emailError: data.emailError,
-          },
-        ]);
-        await fetchAllData();
-      }
-    } catch {
-      setChatHistory((prev) => [
-        ...prev,
-        {
-          id: `m_${Date.now()}_neterr`,
+            answered: true,
+            sourceLabel: data.source
+              ? `${data.source.category} · ${data.source.title}`
+              : "Syllabus · Material del curso",
+            sourceSnippet: data.source?.snippet,
+            confidence: data.confidence || "Basada en el syllabus",
+          };
+          setChatBySubject((prev) => ({
+            ...prev,
+            [selectedSubjectId]: [...(prev[selectedSubjectId] || []), botMsg],
+          }));
+          return;
+        }
+
+        // Honest message + editable ticket draft (STYLES.md §1)
+        const draftMsg: ChatMessage = {
+          id: makeId("draft"),
           sender: "bot",
-          text: "Error de conexión al consultar al chatbot.",
+          text: "No encuentro esto en el material del curso.",
           answered: false,
-        },
-      ]);
+          isTicketDraft: true,
+          draftQuestion: currentQ,
+          draftContext:
+            data.draftContext ||
+            `Asignatura: ${connectedTeacher.course} · Consultado por ${studentName} en el chat.`,
+        };
+        setChatBySubject((prev) => ({
+          ...prev,
+          [selectedSubjectId]: [...(prev[selectedSubjectId] || []), draftMsg],
+        }));
+        return;
+      }
+
+      // Demo / Local syllabus lookup when no Neon code is connected yet
+      await new Promise((r) => setTimeout(r, 450));
+      const localRes = findLocalSyllabusAnswer(currentQ);
+      if (localRes.known) {
+        const botMsg: ChatMessage = {
+          id: makeId("b"),
+          sender: "bot",
+          text: localRes.answer,
+          answered: true,
+          sourceLabel: localRes.sourceLabel,
+          sourceSnippet: localRes.sourceSnippet,
+          confidence: localRes.confidence,
+        };
+        setChatBySubject((prev) => ({
+          ...prev,
+          [selectedSubjectId]: [...(prev[selectedSubjectId] || []), botMsg],
+        }));
+      } else {
+        const draftMsg: ChatMessage = {
+          id: makeId("draft"),
+          sender: "bot",
+          text: "No encuentro esto en el material del curso.",
+          answered: false,
+          isTicketDraft: true,
+          draftQuestion: currentQ,
+          draftContext: `Asignatura: ${currentSubject.name} · El estudiante consulta una duda que no figura en las secciones del syllabus cargado.`,
+        };
+        setChatBySubject((prev) => ({
+          ...prev,
+          [selectedSubjectId]: [...(prev[selectedSubjectId] || []), draftMsg],
+        }));
+      }
     } finally {
       setAskingGemma(false);
     }
   }
 
+  function handleUpdateDraftQuestion(msgId: string, newQuestion: string) {
+    setChatBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: (prev[selectedSubjectId] || []).map((m) =>
+        m.id === msgId ? { ...m, draftQuestion: newQuestion } : m
+      ),
+    }));
+  }
+
+  function handleUpdateDraftContext(msgId: string, newContext: string) {
+    setChatBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: (prev[selectedSubjectId] || []).map((m) =>
+        m.id === msgId ? { ...m, draftContext: newContext } : m
+      ),
+    }));
+  }
+
+  async function handleSendTicketToProfessor(msg: ChatMessage) {
+    const finalQuestion = (msg.draftQuestion || "").trim();
+    const finalContext = (msg.draftContext || "").trim();
+    if (!finalQuestion) return;
+
+    let emailSent = false;
+    let emailId: string | undefined;
+    let emailError: string | undefined;
+    let escalatedTo = connectedTeacher?.email || "profesor@universidad.edu";
+
+    if (connectedTeacher) {
+      try {
+        const res = await fetch("/api/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            action: "send_ticket",
+            accessCode: connectedTeacher.accessCode,
+            studentName,
+            studentEmail,
+            question: finalQuestion,
+          }),
+        });
+        const data = await res.json();
+        emailSent = Boolean(data.emailSent);
+        emailId = data.emailId;
+        emailError = data.emailError;
+        escalatedTo = data.escalatedTo || escalatedTo;
+        await fetchAllData();
+      } catch {
+        emailError = "Registrado en la bandeja de tickets del profesor.";
+      }
+    } else {
+      // Also add to Professor's local Bandeja de tickets so the user can see it live!
+      const newTicketId = makeId("local-ticket");
+      setLocalTickets((prev) => [
+        {
+          id: newTicketId,
+          course: currentSubject.name,
+          question: finalQuestion,
+          status: /parcial|examen|urgente|hoy/i.test(finalQuestion)
+            ? "urgent"
+            : "pending",
+          statusLabel: /parcial|examen|urgente|hoy/i.test(finalQuestion)
+            ? "Urgente · parcial cerca"
+            : "Pendiente",
+          metaLabel: "Agrupa N preguntas similares",
+          similarCount: 1,
+          assistantContext: `Contexto del asistente: ${finalContext}`,
+          addedToKb: true,
+          escalationIds: [],
+          studentEmails: [studentEmail],
+        },
+        ...prev,
+      ]);
+    }
+
+    const trackerId = makeId("st");
+    setStudentTickets((prev) => [
+      {
+        id: trackerId,
+        course: connectedTeacher?.course || currentSubject.name,
+        question: finalQuestion,
+        context: finalContext,
+        step: "enviado",
+        createdAt: "Justo ahora",
+      },
+      ...prev,
+    ]);
+
+    setChatBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: (prev[selectedSubjectId] || []).map((m) =>
+        m.id === msg.id
+          ? {
+              ...m,
+              ticketSent: true,
+              ticketId: trackerId,
+              escalatedTo,
+              emailSent,
+              emailId,
+              emailError,
+            }
+          : m
+      ),
+    }));
+  }
+
+  function handleFeedback(msgId: string, vote: "up" | "down") {
+    setChatBySubject((prev) => ({
+      ...prev,
+      [selectedSubjectId]: (prev[selectedSubjectId] || []).map((m) =>
+        m.id === msgId
+          ? { ...m, feedback: m.feedback === vote ? undefined : vote }
+          : m
+      ),
+    }));
+  }
+
+  const currentMessages = chatBySubject[selectedSubjectId] || [];
   const myTeacherContents = loggedTeacher
     ? contents.filter((c) => c.teacherId === loggedTeacher.id)
     : [];
-  const myTeacherEscalations = loggedTeacher
-    ? escalations.filter((e) => e.teacherId === loggedTeacher.id)
-    : [];
 
   return (
-    <div className="min-h-screen bg-zinc-100 p-4 md:p-8">
-      <div className="mx-auto max-w-5xl space-y-6">
-        {/* Header & Role Selector */}
-        <header className="rounded border border-zinc-300 bg-white p-4 shadow-xs">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h1 className="text-xl font-bold text-zinc-900">
-                Chatbot Estudiantil Open Source (Gemma 4 + Neon Postgres +
-                Resend)
-              </h1>
-              <p className="text-sm text-zinc-600">
-                Perfiles de Admin, Docente (carga de contenidos + código) y
-                Estudiante.
-              </p>
+    <div
+      className={`min-h-screen flex flex-col md:flex-row ${
+        darkMode
+          ? "dark bg-[#0F172A] text-[#F1F5F9]"
+          : "bg-[#F8FAFC] text-[#1E293B]"
+      }`}
+    >
+      {/* ===================== LEFT SIDEBAR (Matches Reference Image) ===================== */}
+      <aside className="w-full md:w-[270px] shrink-0 bg-[#2A236E] dark:bg-[#15123A] text-white flex flex-col justify-between select-none">
+        <div>
+          {/* Brand Logo & Title */}
+          <div className="px-6 pt-7 pb-6 flex items-center gap-3.5">
+            <div className="w-10 h-10 rounded-xl bg-[#4F46E5] flex items-center justify-center shadow-xs shrink-0">
+              {/* Open book icon */}
+              <svg
+                className="w-5 h-5 text-white"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M12 6.253v13m0-13C10.832 5.477 9.246 5 7.5 5S4.168 5.477 3 6.253v13C4.168 18.477 5.754 18 7.5 18s3.332.477 4.5 1.253m0-13C13.168 5.477 14.754 5 16.5 5c1.747 0 3.332.477 4.5 1.253v13C19.832 18.477 18.247 18 16.5 18c-1.746 0-3.332.477-4.5 1.253"
+                />
+              </svg>
             </div>
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveRole("admin");
-                  fetchAllData();
-                }}
-                className={`rounded px-4 py-2 text-sm font-semibold border ${
-                  activeRole === "admin"
-                    ? "bg-zinc-900 text-white border-zinc-900"
-                    : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-100"
-                }`}
-              >
-                1. Perfil Admin (
-                {teachers.filter((t) => t.status === "pending").length}{" "}
-                pendientes)
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveRole("docente");
-                  fetchAllData();
-                }}
-                className={`rounded px-4 py-2 text-sm font-semibold border ${
-                  activeRole === "docente"
-                    ? "bg-zinc-900 text-white border-zinc-900"
-                    : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-100"
-                }`}
-              >
-                2. Perfil Docente
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveRole("estudiante");
-                  fetchAllData();
-                }}
-                className={`rounded px-4 py-2 text-sm font-semibold border ${
-                  activeRole === "estudiante"
-                    ? "bg-zinc-900 text-white border-zinc-900"
-                    : "bg-white text-zinc-800 border-zinc-300 hover:bg-zinc-100"
-                }`}
-              >
-                3. Perfil Estudiante
-              </button>
-            </div>
+            <span className="font-bold text-[17px] tracking-tight text-white">
+              Learn Student Diary
+            </span>
           </div>
-        </header>
 
-        {/* ===================== PERFIL ADMIN ===================== */}
-        {activeRole === "admin" && (
-          <section className="space-y-6">
-            <div className="rounded border border-zinc-300 bg-white p-5">
-              <div className="flex items-center justify-between mb-4">
-                <div>
-                  <h2 className="text-lg font-bold">
-                    Panel de Administrador — Aprobación de Login de Docentes
-                  </h2>
-                  <p className="text-sm text-zinc-600">
-                    Acepta el login del docente para activar su código de
-                    conexión y habilitarle el espacio de carga de información en
-                    Neon Postgres.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => fetchAllData()}
-                  className="rounded border border-zinc-300 px-3 py-1.5 text-xs font-medium hover:bg-zinc-100"
-                >
-                  {loadingData ? "Actualizando..." : "Refrescar"}
-                </button>
+          {/* Primary Navigation Items (Reference Image) */}
+          <nav
+            aria-label="Navegación principal"
+            className="px-3.5 space-y-2 mt-1"
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setAppView("profesor");
+                setProfesorNav("bandeja");
+              }}
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+                appView === "profesor" && profesorNav === "bandeja"
+                  ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
+                  : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
+              }`}
+            >
+              {/* Tray / Inbox icon */}
+              <svg
+                className="w-5 h-5 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"
+                />
+              </svg>
+              <span>Bandeja de tickets</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAppView("profesor");
+                setProfesorNav("conocimiento");
+              }}
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+                appView === "profesor" && profesorNav === "conocimiento"
+                  ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
+                  : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
+              }`}
+            >
+              {/* Bookshelf icon */}
+              <svg
+                className="w-5 h-5 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M5 4v16M9 4v16M14 5l4 15M4 20h16"
+                />
+              </svg>
+              <span>Base de conocimiento</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setAppView("profesor");
+                setProfesorNav("metricas");
+              }}
+              className={`w-full min-h-[48px] px-4 py-3 rounded-2xl flex items-center gap-3.5 text-[15px] transition-colors text-left ${
+                appView === "profesor" && profesorNav === "metricas"
+                  ? "bg-[#4F46E5] text-white font-semibold shadow-xs"
+                  : "text-indigo-200 hover:bg-white/10 hover:text-white font-medium"
+              }`}
+            >
+              {/* Metrics / Bar chart icon */}
+              <svg
+                className="w-5 h-5 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={2}
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M4 20h16M7 16v-6M12 16v-3M17 16V7"
+                />
+              </svg>
+              <span>Métricas</span>
+            </button>
+          </nav>
+        </div>
+
+        {/* Bottom Switcher: Vista Estudiante, Admin & Modo Oscuro (STYLES.md) */}
+        <div className="p-4 mt-8 border-t border-white/10 space-y-2">
+          <p className="px-2 text-[11px] font-bold uppercase tracking-wider text-indigo-300/80">
+            Cambiar experiencia
+          </p>
+          <button
+            type="button"
+            onClick={() => setAppView("estudiante")}
+            className={`w-full min-h-[44px] px-3.5 py-2.5 rounded-xl flex items-center justify-between text-xs font-semibold transition-colors ${
+              appView === "estudiante"
+                ? "bg-[#14B8A6] text-slate-950"
+                : "bg-white/10 text-indigo-100 hover:bg-white/15"
+            }`}
+          >
+            <span>💬 Chat del estudiante</span>
+            <span className="text-[11px] opacity-80">Vista alumno</span>
+          </button>
+
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setAppView("admin");
+                fetchAllData();
+              }}
+              className={`flex-1 min-h-[44px] px-3 py-2 rounded-xl text-xs font-semibold transition-colors ${
+                appView === "admin"
+                  ? "bg-amber-400 text-slate-950"
+                  : "bg-white/10 text-indigo-100 hover:bg-white/15"
+              }`}
+            >
+              Admin ({teachers.filter((t) => t.status === "pending").length})
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setDarkMode((d) => !d)}
+              aria-label="Alternar modo oscuro"
+              className="min-h-[44px] px-3 py-2 rounded-xl bg-white/10 text-indigo-100 hover:bg-white/15 text-xs font-semibold transition-colors"
+            >
+              {darkMode ? "☀️ Claro" : "🌙 Oscuro"}
+            </button>
+          </div>
+        </div>
+      </aside>
+
+      {/* ===================== MAIN CONTENT WORKSPACE ===================== */}
+      <main className="flex-1 min-w-0">
+        {/* =====================================================================
+            1. VISTA DEL PROFESOR: BANDEJA DE TICKETS (Reference Image Match)
+           ===================================================================== */}
+        {appView === "profesor" && profesorNav === "bandeja" && (
+          <div className="max-w-[1180px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
+            {/* Header Row */}
+            <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                  Bandeja de tickets
+                </h1>
+                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
+                  {loggedTeacher?.course || currentSubject.name} · preguntas que
+                  el asistente no pudo resolver
+                </p>
               </div>
 
-              {teachers.length === 0 ? (
-                <p className="text-sm text-zinc-500 py-4">
-                  Aún no hay docentes registrados. Ve a{" "}
-                  <strong>2. Perfil Docente</strong> e ingresa con un correo.
-                </p>
-              ) : (
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-left text-sm">
-                    <thead>
-                      <tr className="border-b border-zinc-200 bg-zinc-50">
-                        <th className="p-2.5 font-semibold">Docente</th>
-                        <th className="p-2.5 font-semibold">Correo</th>
-                        <th className="p-2.5 font-semibold">Curso</th>
-                        <th className="p-2.5 font-semibold">
-                          Código Estudiantes
-                        </th>
-                        <th className="p-2.5 font-semibold">Estado Login</th>
-                        <th className="p-2.5 font-semibold">Acciones Admin</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {teachers.map((t) => (
-                        <tr key={t.id} className="border-b border-zinc-200">
-                          <td className="p-2.5 font-medium">{t.name}</td>
-                          <td className="p-2.5">{t.email}</td>
-                          <td className="p-2.5">{t.course}</td>
-                          <td className="p-2.5">
-                            <code className="rounded bg-zinc-100 px-2 py-0.5 font-mono text-xs font-bold text-zinc-900 border border-zinc-300">
-                              {t.accessCode}
-                            </code>
-                          </td>
-                          <td className="p-2.5">
-                            {t.status === "pending" && (
-                              <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800">
-                                PENDIENTE
-                              </span>
-                            )}
-                            {t.status === "approved" && (
-                              <span className="inline-block rounded bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800">
-                                ACEPTADO
-                              </span>
-                            )}
-                            {t.status === "rejected" && (
-                              <span className="inline-block rounded bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-800">
-                                RECHAZADO
-                              </span>
-                            )}
-                          </td>
-                          <td className="p-2.5 space-x-2">
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleUpdateTeacherStatus(t.id, "approved")
-                              }
-                              disabled={t.status === "approved"}
-                              className="rounded bg-emerald-600 px-3 py-1 text-xs font-semibold text-white hover:bg-emerald-700 disabled:opacity-40"
-                            >
-                              Aceptar Login
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                handleUpdateTeacherStatus(t.id, "rejected")
-                              }
-                              disabled={t.status === "rejected"}
-                              className="rounded bg-red-600 px-3 py-1 text-xs font-semibold text-white hover:bg-red-700 disabled:opacity-40"
-                            >
-                              Rechazar
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
+              {/* Subject Pill (Right top corner in Reference Image) */}
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const idx = SUBJECTS.findIndex(
+                      (s) => s.id === selectedSubjectId
+                    );
+                    const next = SUBJECTS[(idx + 1) % SUBJECTS.length];
+                    setSelectedSubjectId(next.id);
+                  }}
+                  title="Haz clic para cambiar de asignatura"
+                  className="min-h-[44px] rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2 flex items-center gap-2.5 shadow-2xs hover:border-slate-300 transition-colors"
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full shrink-0"
+                    style={{ backgroundColor: currentSubject.accentHex }}
+                  />
+                  <span className="text-[14px] font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                    {loggedTeacher?.course || currentSubject.name}
+                  </span>
+                </button>
+              </div>
+            </header>
 
-            <div className="rounded border border-zinc-300 bg-white p-5">
-              <h3 className="text-base font-bold mb-2">
-                Alertas Enviadas con Resend a Docentes (Cuando Gemma 4 responde
-                NO_SE)
-              </h3>
-              {escalations.length === 0 ? (
-                <p className="text-sm text-zinc-500">
-                  No se han escalado consultas todavía.
+            {/* 3 Metric Cards Row (Exact Match to Reference Image) */}
+            <section
+              aria-label="Métricas rápidas del curso"
+              className="grid grid-cols-1 md:grid-cols-3 gap-5"
+            >
+              {/* Card 1: Dudas resueltas por la IA */}
+              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
+                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+                  Dudas resueltas por la IA
                 </p>
-              ) : (
-                <ul className="space-y-2 text-sm">
-                  {escalations.map((esc) => (
-                    <li
-                      key={esc.id}
-                      className="rounded border border-zinc-200 p-3 bg-zinc-50"
+                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#115E59] dark:text-[#14B8A6] tracking-tight">
+                  [ 00 % ]
+                </p>
+              </div>
+
+              {/* Card 2: Tiempo ahorrado esta semana */}
+              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
+                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+                  Tiempo ahorrado esta semana
+                </p>
+                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#3730A3] dark:text-indigo-400 tracking-tight">
+                  [ 0 h ]
+                </p>
+              </div>
+
+              {/* Card 3: Tema más confuso */}
+              <div className="rounded-2xl border border-slate-200/90 dark:border-slate-800 bg-white dark:bg-slate-900 px-6 py-5 shadow-2xs">
+                <p className="text-[13.5px] font-bold text-[#475569] dark:text-slate-400">
+                  Tema más confuso
+                </p>
+                <p className="mt-1.5 text-[32px] leading-none font-extrabold text-[#92400E] dark:text-amber-400 tracking-tight">
+                  [ tema ]
+                </p>
+              </div>
+            </section>
+
+            {/* Two-Column Section: Ticket List (Left) & Responder Panel (Right) */}
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start pt-1">
+              {/* Left Column: Grouped Tickets */}
+              <section
+                aria-label="Tickets pendientes agrupados"
+                className="lg:col-span-7 space-y-3.5"
+              >
+                <h2 className="text-[12.5px] font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                  PENDIENTES, AGRUPADOS POR PREGUNTA SIMILAR
+                </h2>
+
+                <div className="space-y-3.5">
+                  {combinedTickets.map((ticket) => {
+                    const isSelected = selectedTicket?.id === ticket.id;
+                    return (
+                      <button
+                        key={ticket.id}
+                        type="button"
+                        onClick={() => handleSelectTicket(ticket)}
+                        className={`w-full text-left rounded-2xl bg-white dark:bg-slate-900 p-5 transition-all block ${
+                          isSelected
+                            ? "border-2 border-[#4F46E5] shadow-xs"
+                            : "border border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700"
+                        }`}
+                      >
+                        <div className="flex flex-wrap items-center gap-2.5 mb-2.5">
+                          {/* Accessible Status Badge: Icon + Text + Family Contrast Colors */}
+                          {ticket.status === "urgent" && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEE2E2] text-[#991B1B] px-3 py-1 text-xs font-bold">
+                              <svg
+                                className="w-3.5 h-3.5 shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2.2}
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                                />
+                              </svg>
+                              <span>{ticket.statusLabel}</span>
+                            </span>
+                          )}
+
+                          {ticket.status === "pending" && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] text-[#92400E] px-3 py-1 text-xs font-bold">
+                              <svg
+                                className="w-3.5 h-3.5 shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2.2}
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"
+                                />
+                              </svg>
+                              <span>{ticket.statusLabel}</span>
+                            </span>
+                          )}
+
+                          {ticket.status === "resolved" && (
+                            <span className="inline-flex items-center gap-1.5 rounded-full bg-[#DCFCE7] text-[#166534] px-3 py-1 text-xs font-bold">
+                              <svg
+                                className="w-3.5 h-3.5 shrink-0"
+                                fill="none"
+                                viewBox="0 0 24 24"
+                                stroke="currentColor"
+                                strokeWidth={2.5}
+                                aria-hidden="true"
+                              >
+                                <path
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                  d="M5 13l4 4L19 7"
+                                />
+                              </svg>
+                              <span>{ticket.statusLabel}</span>
+                            </span>
+                          )}
+
+                          <span className="text-[13px] font-bold text-[#475569] dark:text-slate-400">
+                            {ticket.metaLabel}
+                          </span>
+                        </div>
+
+                        <p className="text-[16.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] leading-snug">
+                          {ticket.question}
+                        </p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </section>
+
+              {/* Right Column: RESPONDER Panel */}
+              <section
+                aria-label="Responder al ticket seleccionado"
+                className="lg:col-span-5 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 shadow-2xs"
+              >
+                {selectedTicket && (
+                  <form onSubmit={handleReplyToStudents} className="space-y-4">
+                    <div className="text-[12.5px] font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                      RESPONDER
+                    </div>
+
+                    <h3 className="text-[17.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] leading-snug">
+                      {selectedTicket.question}
+                    </h3>
+
+                    {/* Assistant Context Box in Soft Teal (#CCFBF1 / #115E59) */}
+                    <div className="rounded-xl bg-[#CCFBF1] text-[#115E59] px-4 py-3.5 text-[13.5px] leading-relaxed font-medium">
+                      {selectedTicket.assistantContext}
+                    </div>
+
+                    <div>
+                      <label
+                        htmlFor="profesor-respuesta-textarea"
+                        className="block text-[13.5px] font-bold text-[#1E293B] dark:text-[#F1F5F9] mb-2"
+                      >
+                        Tu respuesta
+                      </label>
+                      <textarea
+                        id="profesor-respuesta-textarea"
+                        required
+                        rows={7}
+                        placeholder="Escribe aquí la respuesta para los estudiantes..."
+                        value={replyText}
+                        onChange={(e) => setReplyText(e.target.value)}
+                        className="w-full rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-4 text-[14px] text-[#1E293B] dark:text-[#F1F5F9] placeholder:text-slate-400 focus:border-[#4F46E5] focus:outline-none resize-y"
+                      />
+                    </div>
+
+                    {/* Checkbox "Añadir a la base de conocimiento" in Soft Indigo (#EEF2FF / #3730A3) */}
+                    <label className="min-h-[48px] rounded-xl bg-[#EEF2FF] dark:bg-indigo-950/70 px-4 py-3 flex items-center gap-3 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={addToKbChecked}
+                        onChange={(e) => setAddToKbChecked(e.target.checked)}
+                        className="w-5 h-5 rounded accent-[#4F46E5] cursor-pointer"
+                      />
+                      <span className="text-[13.5px] font-bold text-[#3730A3] dark:text-indigo-200">
+                        Añadir a la base de conocimiento
+                      </span>
+                    </label>
+
+                    <button
+                      type="submit"
+                      disabled={sendingReply}
+                      className="w-full min-h-[48px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold text-[14.5px] py-3.5 px-5 transition-colors shadow-xs disabled:opacity-50 cursor-pointer"
                     >
-                      <div>
-                        <strong>Docente destino:</strong> {esc.teacherName} (
-                        {esc.teacherEmail}) |{" "}
-                        <strong>Estudiante:</strong> {esc.studentName} (
-                        {esc.studentEmail})
+                      {sendingReply
+                        ? "Enviando respuesta..."
+                        : "Responder a todos los estudiantes"}
+                    </button>
+
+                    {replyFeedbackMsg && (
+                      <div className="rounded-xl bg-[#DCFCE7] text-[#166534] px-4 py-3 text-xs font-bold flex items-center gap-2">
+                        <span>✓</span>
+                        <span>{replyFeedbackMsg}</span>
                       </div>
-                      <div className="mt-1">
-                        <strong>Pregunta sin respuesta en contenidos:</strong>{" "}
-                        {esc.question}
-                      </div>
-                      <div className="mt-1 text-xs text-zinc-600">
-                        Estado Resend:{" "}
-                        {esc.emailSent
-                          ? `Correo enviado exitosamente (ID: ${esc.emailId})`
-                          : `Registrado en bandeja (${esc.emailError})`}
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              )}
+                    )}
+                  </form>
+                )}
+              </section>
             </div>
-          </section>
+          </div>
         )}
 
-        {/* ===================== PERFIL DOCENTE ===================== */}
-        {activeRole === "docente" && (
-          <section className="space-y-6">
-            {/* Paso 1: Login del Docente */}
-            <div className="rounded border border-zinc-300 bg-white p-5">
-              <h2 className="text-lg font-bold mb-1">
-                Paso 1: Acceso Docente (Login por Correo)
-              </h2>
-              <p className="text-sm text-zinc-600 mb-4">
-                Ingresa con tu correo electrónico. Cuando el{" "}
-                <strong>Admin</strong> acepte tu login, tendrás tu{" "}
-                <strong>código único</strong> para compartir con los estudiantes
-                y se habilitará el espacio inferior para cargar la información
-                de tu curso.
-              </p>
+        {/* =====================================================================
+            2. VISTA DEL PROFESOR: BASE DE CONOCIMIENTO (Neon Postgres + Syllabus)
+           ===================================================================== */}
+        {appView === "profesor" && profesorNav === "conocimiento" && (
+          <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
+            <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                  Base de conocimiento
+                </h1>
+                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
+                  Carga el syllabus y el material del curso en Neon Postgres
+                  para que Gemma 4 responda con fuente verificable
+                </p>
+              </div>
+              <div className="rounded-full border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-5 py-2 flex items-center gap-2.5">
+                <span
+                  className="w-2.5 h-2.5 rounded-full"
+                  style={{ backgroundColor: currentSubject.accentHex }}
+                />
+                <span className="text-sm font-bold">
+                  {loggedTeacher?.course || currentSubject.name}
+                </span>
+              </div>
+            </header>
+
+            {/* Paso 1: Identificación Docente y Código de Curso */}
+            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+              <div>
+                <h2 className="text-base font-bold">
+                  1. Cuenta Docente y Código de Asignatura
+                </h2>
+                <p className="text-sm text-[#475569] dark:text-slate-400">
+                  Conéctate con tu correo institucional para gestionar tus
+                  documentos en Neon Postgres y obtener el código de acceso para
+                  tus estudiantes.
+                </p>
+              </div>
 
               <form
                 onSubmit={handleDocenteLogin}
@@ -615,187 +1594,161 @@ export default function HomePage() {
                   placeholder="Correo del docente *"
                   value={docenteEmail}
                   onChange={(e) => setDocenteEmail(e.target.value)}
-                  className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
                 />
                 <input
                   type="text"
-                  placeholder="Nombre del docente"
+                  placeholder="Nombre del profesor"
                   value={docenteName}
                   onChange={(e) => setDocenteName(e.target.value)}
-                  className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
                 />
                 <input
                   type="text"
-                  placeholder="Materia / Curso"
+                  placeholder="Asignatura (ej. Cálculo II)"
                   value={docenteCourse}
                   onChange={(e) => setDocenteCourse(e.target.value)}
-                  className="rounded border border-zinc-300 px-3 py-2 text-sm"
+                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
                 />
                 <input
                   type="text"
-                  placeholder="Código opcional (ej. MAT-101)"
+                  placeholder="Código opcional (CALC-202)"
                   value={docenteCustomCode}
                   onChange={(e) =>
                     setDocenteCustomCode(e.target.value.toUpperCase())
                   }
-                  className="rounded border border-zinc-300 px-3 py-2 text-sm font-mono uppercase"
+                  className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm font-mono uppercase"
                 />
                 <button
                   type="submit"
-                  className="rounded bg-zinc-900 px-4 py-2 text-sm font-semibold text-white hover:bg-zinc-800"
+                  className="min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-4 py-2 text-sm font-bold text-white transition-colors"
                 >
-                  Ingresar / Solicitar
+                  Conectar cuenta
                 </button>
               </form>
 
               {docenteMsg && (
-                <p className="mt-3 text-sm font-medium text-blue-700">
+                <div className="rounded-xl bg-[#EEF2FF] text-[#3730A3] px-4 py-2.5 text-xs font-bold">
                   {docenteMsg}
-                </p>
+                </div>
               )}
 
               {loggedTeacher && (
-                <div className="mt-4 rounded border border-zinc-200 bg-zinc-50 p-4">
-                  <div className="flex flex-wrap items-center justify-between gap-4">
-                    <div>
-                      <p className="text-sm">
-                        Docente: <strong>{loggedTeacher.name}</strong> (
-                        {loggedTeacher.email}) — Curso:{" "}
-                        <strong>{loggedTeacher.course}</strong>
-                      </p>
-                      <p className="text-sm mt-1">
-                        Estado de login:{" "}
-                        {loggedTeacher.status === "pending" && (
-                          <span className="font-bold text-amber-700">
-                            PENDIENTE DE APROBACIÓN POR EL ADMIN
-                          </span>
-                        )}
-                        {loggedTeacher.status === "approved" && (
-                          <span className="font-bold text-emerald-700">
-                            ACEPTADO POR EL ADMIN
-                          </span>
-                        )}
-                        {loggedTeacher.status === "rejected" && (
-                          <span className="font-bold text-red-700">
-                            RECHAZADO POR EL ADMIN
-                          </span>
-                        )}
-                      </p>
-                    </div>
-
-                    {loggedTeacher.status === "approved" && (
-                      <div className="flex items-center gap-2 rounded border border-emerald-300 bg-emerald-50 px-3 py-2">
-                        <div className="text-xs text-emerald-950">
-                          Código para tus estudiantes:{" "}
-                          <strong className="font-mono text-base ml-1">
-                            {loggedTeacher.accessCode}
-                          </strong>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyTeacherCode(loggedTeacher.accessCode)
-                          }
-                          className="rounded bg-emerald-700 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-800"
-                        >
-                          {copiedCode ? "¡Copiado!" : "Copiar código"}
-                        </button>
-                      </div>
-                    )}
-
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => fetchAllData(loggedTeacher.email)}
-                        className="rounded border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium hover:bg-zinc-100"
-                      >
-                        Actualizar estado
-                      </button>
+                <div className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 flex flex-wrap items-center justify-between gap-4">
+                  <div className="space-y-1 text-sm">
+                    <p>
+                      Profesor: <strong>{loggedTeacher.name}</strong> (
+                      {loggedTeacher.email}) · Asignatura:{" "}
+                      <strong>{loggedTeacher.course}</strong>
+                    </p>
+                    <div className="flex items-center gap-2">
+                      <span>Estado:</span>
                       {loggedTeacher.status === "pending" && (
-                        <button
-                          type="button"
-                          onClick={() => setActiveRole("admin")}
-                          className="rounded bg-amber-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-amber-700"
-                        >
-                          Ir a Perfil Admin para aceptar
-                        </button>
+                        <span className="rounded-full bg-[#FEF3C7] text-[#92400E] px-2.5 py-0.5 text-xs font-bold">
+                          🕒 Pendiente de aprobación Admin
+                        </span>
+                      )}
+                      {loggedTeacher.status === "approved" && (
+                        <span className="rounded-full bg-[#DCFCE7] text-[#166534] px-2.5 py-0.5 text-xs font-bold">
+                          ✓ Aprobado y activo
+                        </span>
+                      )}
+                      {loggedTeacher.status === "rejected" && (
+                        <span className="rounded-full bg-[#FEE2E2] text-[#991B1B] px-2.5 py-0.5 text-xs font-bold">
+                          ⚠ Rechazado
+                        </span>
                       )}
                     </div>
                   </div>
+
+                  {loggedTeacher.status === "approved" ? (
+                    <div className="flex items-center gap-3 rounded-xl bg-[#CCFBF1] text-[#115E59] px-4 py-2.5">
+                      <span className="text-xs font-bold">
+                        Código para estudiantes:{" "}
+                        <strong className="font-mono text-sm ml-1">
+                          {loggedTeacher.accessCode}
+                        </strong>
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          handleCopyTeacherCode(loggedTeacher.accessCode)
+                        }
+                        className="min-h-[36px] rounded-lg bg-[#115E59] text-white px-3 py-1 text-xs font-bold"
+                      >
+                        {copiedCode ? "¡Copiado!" : "Copiar"}
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setAppView("admin")}
+                      className="min-h-[44px] rounded-xl bg-[#FEF3C7] text-[#92400E] px-4 py-2 text-xs font-bold"
+                    >
+                      Ir a Panel Admin para aprobar →
+                    </button>
+                  )}
                 </div>
               )}
-            </div>
+            </section>
 
-            {/* Paso 2: Espacio de Carga de Información del Docente */}
-            <div className="rounded border border-zinc-300 bg-white p-5">
-              <h2 className="text-lg font-bold mb-1">
-                Paso 2: Espacio del Docente para Cargar Información del Curso
+            {/* Paso 2: Subir Syllabus / Material */}
+            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+              <h2 className="text-base font-bold">
+                2. Cargar sección del syllabus o material del curso
               </h2>
-              <p className="text-sm text-zinc-600 mb-4">
-                Aquí cargas la información académica (plataformas, tareas, notas
-                e información general) en <strong>Neon Postgres</strong> para
-                que <strong>Gemma 4</strong> responda las consultas de tus
-                estudiantes.
-              </p>
 
-              {!loggedTeacher ? (
-                <div className="rounded border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700">
-                  Primero ingresa tu correo en el <strong>Paso 1</strong> arriba
-                  para identificar tu cuenta docente.
-                </div>
-              ) : loggedTeacher.status !== "approved" ? (
-                <div className="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-                  Tu cuenta (<strong>{loggedTeacher.email}</strong>) está en
-                  estado <strong>{loggedTeacher.status.toUpperCase()}</strong>.
-                  Un Administrador debe aceptar tu login en{" "}
-                  <strong>1. Perfil Admin</strong> para habilitar la carga de
-                  información.
+              {!loggedTeacher || loggedTeacher.status !== "approved" ? (
+                <div className="rounded-xl bg-[#FEF3C7] text-[#92400E] p-4 text-sm font-medium">
+                  Conéctate arriba con una cuenta docente aprobada para guardar
+                  nuevos fragmentos en Neon Postgres. Abajo puedes explorar las
+                  secciones del syllabus de referencia de{" "}
+                  <strong>{currentSubject.name}</strong>.
                 </div>
               ) : (
-                <form onSubmit={handleAddContent} className="space-y-3">
+                <form onSubmit={handleAddContent} className="space-y-4">
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                     <div>
-                      <label className="block text-xs font-semibold mb-1">
-                        Categoría de la información
+                      <label className="block text-xs font-bold mb-1.5">
+                        Categoría
                       </label>
                       <select
                         value={category}
                         onChange={(e) =>
                           setCategory(e.target.value as ContentCategory)
                         }
-                        className="w-full rounded border border-zinc-300 px-3 py-2 text-sm bg-white"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
                       >
-                        <option value="Plataformas">Plataformas</option>
-                        <option value="Tareas">Tareas</option>
-                        <option value="Notas">Notas</option>
                         <option value="Información general">
-                          Información general
+                          Syllabus / Información general
                         </option>
+                        <option value="Tareas">Tareas y Talleres</option>
+                        <option value="Notas">Evaluación y Notas</option>
+                        <option value="Plataformas">Plataformas</option>
                       </select>
                     </div>
-
                     <div className="sm:col-span-2">
-                      <label className="block text-xs font-semibold mb-1">
-                        Título del tema o documento
+                      <label className="block text-xs font-bold mb-1.5">
+                        Etiqueta de fuente (ej. Syllabus · Sección 3.2)
                       </label>
                       <input
                         type="text"
                         required
-                        placeholder="Ej: Entrega Taller 3, Cálculo de nota final, Uso de Moodle..."
+                        placeholder="Ej: Syllabus · Sección 3.2 — Política de calculadoras"
                         value={contentTitle}
                         onChange={(e) => setContentTitle(e.target.value)}
-                        className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
+                        className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3.5 py-2 text-sm"
                       />
                     </div>
                   </div>
 
                   <div>
-                    <div className="flex items-center justify-between mb-1">
-                      <label className="block text-xs font-semibold">
-                        Información / Contenido detallado para Gemma 4
+                    <div className="flex items-center justify-between mb-1.5">
+                      <label className="text-xs font-bold">
+                        Contenido original del fragmento
                       </label>
-                      <label className="cursor-pointer text-xs font-semibold text-blue-700 hover:underline">
-                        + O subir archivo de texto (.txt / .md / .csv)
+                      <label className="cursor-pointer text-xs font-bold text-[#4F46E5] hover:underline">
+                        + Importar archivo (.txt, .md, .csv)
                         <input
                           type="file"
                           accept=".txt,.md,.csv,.json"
@@ -806,288 +1759,812 @@ export default function HomePage() {
                     </div>
                     <textarea
                       required
-                      rows={5}
-                      placeholder="Escribe o pega aquí toda la información del curso: fechas de entrega, rúbricas, notas, enlaces de plataforma, horarios de atención, etc."
+                      rows={4}
+                      placeholder="Pega aquí el texto exacto del syllabus o guía para que la IA lo cite como fuente..."
                       value={contentBody}
                       onChange={(e) => setContentBody(e.target.value)}
-                      className="w-full rounded border border-zinc-300 p-3 text-sm"
+                      className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 p-3.5 text-sm"
                     />
                   </div>
 
                   <button
                     type="submit"
                     disabled={savingContent}
-                    className="rounded bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+                    className="min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] px-5 py-2.5 text-sm font-bold text-white transition-colors"
                   >
                     {savingContent
                       ? "Guardando en Neon Postgres..."
-                      : "Cargar Información en Base de Conocimiento (Neon)"}
+                      : "Guardar en la base de conocimiento"}
                   </button>
                 </form>
               )}
-            </div>
 
-            {loggedTeacher && loggedTeacher.status === "approved" && (
-              <>
-                {/* Lista de contenidos del docente */}
-                <div className="rounded border border-zinc-300 bg-white p-5">
-                  <h3 className="text-base font-bold mb-3">
-                    Información Cargada en mi Curso ({myTeacherContents.length})
-                  </h3>
-                  {myTeacherContents.length === 0 ? (
-                    <p className="text-sm text-zinc-500">
-                      Todavía no has cargado información para tus estudiantes.
-                    </p>
-                  ) : (
-                    <ul className="space-y-3">
-                      {myTeacherContents.map((item) => (
-                        <li
-                          key={item.id}
-                          className="rounded border border-zinc-200 p-3 bg-zinc-50 flex items-start justify-between gap-4"
-                        >
-                          <div>
-                            <span className="inline-block rounded bg-zinc-200 px-2 py-0.5 text-xs font-semibold text-zinc-800 mr-2">
-                              {item.category}
-                            </span>
-                            <strong className="text-sm">{item.title}</strong>
-                            <p className="mt-1 text-sm text-zinc-700 whitespace-pre-wrap">
-                              {item.content}
-                            </p>
-                          </div>
+              {/* List of existing knowledge base sections */}
+              <div className="pt-4 border-t border-slate-200 dark:border-slate-800 space-y-3">
+                <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                  Fragmentos activos para el asistente ({currentSubject.name})
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+                  {currentSubject.syllabusSections.map((sec) => (
+                    <div
+                      key={sec.id}
+                      className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 space-y-1.5"
+                    >
+                      <span className="inline-block rounded-lg bg-[#CCFBF1] text-[#115E59] px-2.5 py-0.5 text-xs font-bold">
+                        {sec.section}
+                      </span>
+                      <h4 className="text-sm font-bold">{sec.title}</h4>
+                      <p className="text-xs text-[#475569] dark:text-slate-400 leading-relaxed">
+                        {sec.snippet}
+                      </p>
+                    </div>
+                  ))}
+                  {myTeacherContents.map((item) => (
+                    <div
+                      key={item.id}
+                      className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-4 space-y-1.5 flex flex-col justify-between"
+                    >
+                      <div>
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="inline-block rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-0.5 text-xs font-bold">
+                            {item.category}
+                          </span>
                           <button
                             type="button"
                             onClick={() => handleDeleteContent(item.id)}
-                            className="text-xs font-semibold text-red-600 hover:underline shrink-0"
+                            className="text-xs font-bold text-[#991B1B] hover:underline"
                           >
                             Eliminar
                           </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
+                        </div>
+                        <h4 className="text-sm font-bold mt-1.5">
+                          {item.title}
+                        </h4>
+                        <p className="text-xs text-[#475569] dark:text-slate-400 mt-1 whitespace-pre-wrap">
+                          {item.content}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-
-                {/* Consultas que Gemma 4 no supo y escaló por correo a este docente */}
-                <div className="rounded border border-zinc-300 bg-white p-5">
-                  <h3 className="text-base font-bold mb-2">
-                    Alertas de Estudiantes Escaladas a mi Correo (
-                    {loggedTeacher.email}) ({myTeacherEscalations.length})
-                  </h3>
-                  {myTeacherEscalations.length === 0 ? (
-                    <p className="text-sm text-zinc-500">
-                      Ninguna consulta ha requerido ser escalada a tu correo
-                      todavía.
-                    </p>
-                  ) : (
-                    <ul className="space-y-2 text-sm">
-                      {myTeacherEscalations.map((esc) => (
-                        <li
-                          key={esc.id}
-                          className="rounded border border-amber-200 bg-amber-50 p-3"
-                        >
-                          <div>
-                            <strong>Estudiante:</strong> {esc.studentName} (
-                            <a
-                              href={`mailto:${esc.studentEmail}?subject=Respuesta a tu consulta de ${loggedTeacher.course}`}
-                              className="underline text-blue-700"
-                            >
-                              {esc.studentEmail}
-                            </a>
-                            )
-                          </div>
-                          <div className="mt-1">
-                            <strong>Pregunta:</strong> {esc.question}
-                          </div>
-                          <div className="mt-1 text-xs text-zinc-600">
-                            Resend:{" "}
-                            {esc.emailSent
-                              ? `Enviado a ${esc.teacherEmail} (ID: ${esc.emailId})`
-                              : esc.emailError}
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                </div>
-              </>
-            )}
-          </section>
+              </div>
+            </section>
+          </div>
         )}
 
-        {/* ===================== PERFIL ESTUDIANTE ===================== */}
-        {activeRole === "estudiante" && (
-          <section className="space-y-6">
-            <div className="rounded border border-zinc-300 bg-white p-5">
-              <h2 className="text-lg font-bold mb-1">
-                Módulo del Estudiante — Conexión por Código de Docente
-              </h2>
-              <p className="text-sm text-zinc-600 mb-4">
-                Ingresa el <strong>código de acceso</strong> compartido por tu
-                docente para conectarte a su chatbot de <strong>Gemma 4</strong>
-                . Si Gemma 4 no puede responder con base en los contenidos del
-                curso, enviará automáticamente una alerta con{" "}
-                <strong>Resend</strong> al correo de tu docente.
-              </p>
+        {/* =====================================================================
+            3. VISTA DEL PROFESOR: MÉTRICAS COMPLETAS (STYLES.md §1 y §5)
+           ===================================================================== */}
+        {appView === "profesor" && profesorNav === "metricas" && (
+          <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
+            <header className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h1 className="text-[28px] leading-tight font-bold text-[#1E293B] dark:text-[#F1F5F9]">
+                  Métricas del curso
+                </h1>
+                <p className="text-[14.5px] text-[#475569] dark:text-slate-400 mt-0.5">
+                  Impacto del asistente IA y oportunidades de mejora en el
+                  syllabus de {currentSubject.name}
+                </p>
+              </div>
+            </header>
 
-              {/* Paso 1: Conectarse con el código del docente */}
-              <form
-                onSubmit={handleConnectByCode}
-                className="flex flex-col gap-3 sm:flex-row sm:items-end mb-4 pb-4 border-b border-zinc-200"
-              >
-                <div className="flex-1">
-                  <label className="block text-xs font-semibold mb-1">
-                    Código del Docente / Curso
-                  </label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+                  Dudas resueltas por la IA
+                </p>
+                <p className="mt-2 text-3xl font-extrabold text-[#115E59] dark:text-[#14B8A6]">
+                  [ 00 % ]
+                </p>
+                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                  Cada ticket respondido con &ldquo;Añadir a la base de
+                  conocimiento&rdquo; incrementa esta tasa automáticamente.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+                  Tiempo ahorrado esta semana
+                </p>
+                <p className="mt-2 text-3xl font-extrabold text-[#3730A3] dark:text-indigo-400">
+                  [ 0 h ]
+                </p>
+                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                  Estimado a partir de preguntas repetidas agrupadas en un solo
+                  ticket.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+                <p className="text-xs font-bold text-[#475569] dark:text-slate-400">
+                  Tema más confuso
+                </p>
+                <p className="mt-2 text-3xl font-extrabold text-[#92400E] dark:text-amber-400">
+                  [ tema ]
+                </p>
+                <p className="mt-2 text-xs text-[#475569] dark:text-slate-400">
+                  Detectado en las preguntas que requirieron escalamiento al
+                  profesor.
+                </p>
+              </div>
+            </div>
+
+            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6 space-y-4">
+              <h2 className="text-base font-bold">
+                Sugerencias para mejorar el syllabus según los tickets recibidos
+              </h2>
+              <div className="space-y-3">
+                <div className="rounded-xl bg-[#FEF3C7] text-[#92400E] p-4 flex items-start justify-between gap-4">
+                  <div>
+                    <p className="text-sm font-bold">
+                      🕒 Política de uso de calculadoras en exámenes parciales
+                    </p>
+                    <p className="text-xs mt-1">
+                      Varios estudiantes preguntaron si se permite calculadora
+                      gráfica en el segundo parcial. Añadir una nota en{" "}
+                      <strong>Syllabus · Sección 3.2</strong> evitará futuros
+                      tickets.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setProfesorNav("bandeja")}
+                    className="min-h-[40px] shrink-0 rounded-xl bg-[#92400E] text-white px-3.5 py-2 text-xs font-bold"
+                  >
+                    Ver en bandeja
+                  </button>
+                </div>
+
+                <div className="rounded-xl bg-[#DCFCE7] text-[#166534] p-4">
+                  <p className="text-sm font-bold">
+                    ✓ Formato de entrega del Taller 3 (Integrado a la base de
+                    conocimiento)
+                  </p>
+                  <p className="text-xs mt-1">
+                    La respuesta del profesor ya está disponible para la IA en
+                    futuras preguntas similares.
+                  </p>
+                </div>
+              </div>
+            </section>
+          </div>
+        )}
+
+        {/* =====================================================================
+            4. VISTA DEL ESTUDIANTE: CHAT PRIMERO + BORRADOR DE TICKET + TIMELINE
+           ===================================================================== */}
+        {appView === "estudiante" && (
+          <div className="h-full flex flex-col">
+            {/* Top Subject Selector Tabs with Accent Colors (STYLES.md §1 & §2) */}
+            <header className="border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 px-4 py-3 md:px-7">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {/* Subject Tabs */}
+                <div
+                  role="tablist"
+                  aria-label="Selector de asignatura"
+                  className="flex flex-wrap items-center gap-2"
+                >
+                  {SUBJECTS.map((subj) => {
+                    const active = subj.id === selectedSubjectId;
+                    return (
+                      <button
+                        key={subj.id}
+                        role="tab"
+                        aria-selected={active}
+                        type="button"
+                        onClick={() => setSelectedSubjectId(subj.id)}
+                        className={`min-h-[44px] rounded-xl px-4 py-2 text-sm font-bold flex items-center gap-2.5 transition-all border ${
+                          active
+                            ? "bg-[#EEF2FF] dark:bg-slate-800 text-[#1E293B] dark:text-white border-current shadow-2xs"
+                            : "bg-transparent text-[#475569] dark:text-slate-400 border-transparent hover:bg-slate-100 dark:hover:bg-slate-800/60"
+                        }`}
+                        style={
+                          active ? { borderColor: subj.accentHex } : undefined
+                        }
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-full"
+                          style={{ backgroundColor: subj.accentHex }}
+                        />
+                        <span>{subj.name}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right controls: Connect by Teacher Code & Toggle Side Context Panel */}
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowCodeModal((v) => !v)}
+                    className="min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-[#F8FAFC] dark:bg-slate-800 px-3.5 py-2 text-xs font-bold text-[#3730A3] dark:text-indigo-300"
+                  >
+                    {connectedTeacher
+                      ? `🔗 Código activo: ${connectedTeacher.accessCode}`
+                      : "🔑 Conectar código de docente"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setStudentSidebarOpen((o) => !o)}
+                    className="min-h-[44px] rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3.5 py-2 text-xs font-bold text-[#475569] dark:text-slate-300"
+                  >
+                    {studentSidebarOpen
+                      ? "Ocultar contexto"
+                      : "📅 Ver syllabus y entregas"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Optional Collapsible Bar to Connect with Real Teacher Code (Neon Postgres) */}
+              {showCodeModal && (
+                <form
+                  onSubmit={handleConnectByCode}
+                  className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800 flex flex-wrap items-end gap-3"
+                >
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1">
+                      Código del curso (Neon Postgres)
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="Ej: CALC-202"
+                      value={studentCodeInput}
+                      onChange={(e) =>
+                        setStudentCodeInput(e.target.value.toUpperCase())
+                      }
+                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs font-mono uppercase"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1">
+                      Tu nombre
+                    </label>
+                    <input
+                      type="text"
+                      value={studentName}
+                      onChange={(e) => setStudentName(e.target.value)}
+                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[11px] font-bold mb-1">
+                      Tu correo
+                    </label>
+                    <input
+                      type="email"
+                      value={studentEmail}
+                      onChange={(e) => setStudentEmail(e.target.value)}
+                      className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-950 px-3 py-1.5 text-xs"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={connectingCode}
+                    className="min-h-[44px] rounded-xl bg-[#4F46E5] text-white px-4 py-2 text-xs font-bold"
+                  >
+                    {connectingCode ? "Verificando..." : "Conectar asignatura"}
+                  </button>
+                  {studentConnectError && (
+                    <span className="text-xs font-bold text-[#991B1B] bg-[#FEE2E2] px-3 py-1.5 rounded-lg">
+                      ⚠ {studentConnectError}
+                    </span>
+                  )}
+                </form>
+              )}
+            </header>
+
+            {/* Student Main Body: Center Chat + Collapsible Context Drawer */}
+            <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
+              {/* Center Conversation Area */}
+              <div className="flex-1 flex flex-col p-4 md:p-6 max-w-4xl mx-auto w-full">
+                {/* Messages Stream */}
+                <div className="flex-1 space-y-4 overflow-y-auto pr-1 pb-4">
+                  {currentMessages.length === 0 ? (
+                    /* Friendly Empty State (STYLES.md §3) */
+                    <div className="rounded-2xl border border-dashed border-slate-300 dark:border-slate-700 bg-white/70 dark:bg-slate-900/50 p-10 text-center my-8 space-y-2">
+                      <div
+                        className="w-12 h-12 rounded-2xl mx-auto flex items-center justify-center text-white font-bold text-lg"
+                        style={{ backgroundColor: currentSubject.accentHex }}
+                      >
+                        IA
+                      </div>
+                      <h2 className="text-lg font-bold">
+                        Pregúntame sobre el syllabus, fechas o evaluación
+                      </h2>
+                      <p className="text-sm text-[#475569] dark:text-slate-400 max-w-md mx-auto">
+                        Respondo al instante citando la sección exacta del
+                        material de <strong>{currentSubject.name}</strong>. Si
+                        algo no está en el syllabus, te preparo un ticket para
+                        el profesor.
+                      </p>
+                    </div>
+                  ) : (
+                    currentMessages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex flex-col ${
+                          msg.sender === "student" ? "items-end" : "items-start"
+                        }`}
+                      >
+                        {/* Sender Role Badge (Color communicates who speaks: Teal = IA, Amber = Professor) */}
+                        {msg.sender !== "student" && (
+                          <div className="flex items-center gap-2 mb-1.5 px-1">
+                            {msg.sender === "bot" ? (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#CCFBF1] text-[#115E59] px-2.5 py-0.5 text-[11px] font-bold">
+                                <span className="w-2 h-2 rounded-full bg-[#14B8A6]" />
+                                Asistente IA · {currentSubject.name}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5 rounded-full bg-[#FEF3C7] text-[#92400E] px-2.5 py-0.5 text-[11px] font-bold">
+                                <span className="w-2 h-2 rounded-full bg-[#F59E0B]" />
+                                Profesor · {currentSubject.teacherName}
+                              </span>
+                            )}
+
+                            {msg.confidence && (
+                              <span className="text-[11px] font-semibold text-[#475569] dark:text-slate-400">
+                                · {msg.confidence}
+                              </span>
+                            )}
+                          </div>
+                        )}
+
+                        {/* Bubble Content */}
+                        <div
+                          className={`max-w-2xl rounded-2xl p-4 text-sm leading-relaxed ${
+                            msg.sender === "student"
+                              ? "bg-[#4F46E5] text-white font-medium"
+                              : msg.sender === "professor"
+                                ? "bg-[#FEF3C7] text-[#92400E] border border-[#F59E0B]/40 font-medium"
+                                : "bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-[#1E293B] dark:text-[#F1F5F9] shadow-2xs"
+                          }`}
+                        >
+                          <p className="whitespace-pre-wrap">{msg.text}</p>
+
+                          {/* Source Citation Tag + Thumbs Feedback for AI Answers (STYLES.md §1 & §3) */}
+                          {msg.sender === "bot" && msg.answered && (
+                            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-slate-800 flex flex-wrap items-center justify-between gap-2">
+                              {msg.sourceLabel && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setExpandedSourceMsgId(
+                                      expandedSourceMsgId === msg.id
+                                        ? null
+                                        : msg.id
+                                    )
+                                  }
+                                  className="min-h-[36px] inline-flex items-center gap-1.5 rounded-lg bg-[#CCFBF1] text-[#115E59] px-3 py-1 text-xs font-bold hover:opacity-90 transition-opacity"
+                                >
+                                  <span>📄 {msg.sourceLabel}</span>
+                                  <span className="underline ml-1">
+                                    {expandedSourceMsgId === msg.id
+                                      ? "Ocultar fuente"
+                                      : "Ver fragmento"}
+                                  </span>
+                                </button>
+                              )}
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleFeedback(msg.id, "up")}
+                                  aria-label="Respuesta útil"
+                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border ${
+                                    msg.feedback === "up"
+                                      ? "bg-[#DCFCE7] text-[#166534] border-[#22C55E]"
+                                      : "border-slate-200 dark:border-slate-700 text-[#475569]"
+                                  }`}
+                                >
+                                  👍
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleFeedback(msg.id, "down")}
+                                  aria-label="Respuesta poco útil"
+                                  className={`min-h-[36px] min-w-[36px] rounded-lg px-2 py-1 text-xs font-bold border ${
+                                    msg.feedback === "down"
+                                      ? "bg-[#FEE2E2] text-[#991B1B] border-[#EF4444]"
+                                      : "border-slate-200 dark:border-slate-700 text-[#475569]"
+                                  }`}
+                                >
+                                  👎
+                                </button>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Expanded Original Source Snippet */}
+                          {expandedSourceMsgId === msg.id &&
+                            msg.sourceSnippet && (
+                              <div className="mt-2.5 rounded-xl bg-[#F8FAFC] dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3 text-xs text-[#475569] dark:text-slate-300">
+                                <p className="font-bold text-[#115E59] dark:text-[#14B8A6] mb-1">
+                                  Fragmento original ({msg.sourceLabel}):
+                                </p>
+                                <p>{msg.sourceSnippet}</p>
+                              </div>
+                            )}
+
+                          {/* EL MOMENTO DEL TICKET: Editable Draft when AI doesn't know (STYLES.md §1) */}
+                          {msg.isTicketDraft && !msg.ticketSent && (
+                            <div className="mt-3.5 rounded-xl border border-indigo-200 dark:border-indigo-900 bg-[#EEF2FF]/70 dark:bg-slate-950 p-4 space-y-3">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-extrabold uppercase tracking-wider text-[#3730A3] dark:text-indigo-300">
+                                  Borrador de ticket para el profesor
+                                </span>
+                                <span className="text-[11px] font-semibold text-[#475569]">
+                                  Editable antes de enviar
+                                </span>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-[#1E293B] dark:text-slate-200 mb-1">
+                                  Tu pregunta
+                                </label>
+                                <input
+                                  type="text"
+                                  value={msg.draftQuestion || ""}
+                                  onChange={(e) =>
+                                    handleUpdateDraftQuestion(
+                                      msg.id,
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-medium"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-bold text-[#1E293B] dark:text-slate-200 mb-1">
+                                  Contexto de la conversación
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={msg.draftContext || ""}
+                                  onChange={(e) =>
+                                    handleUpdateDraftContext(
+                                      msg.id,
+                                      e.target.value
+                                    )
+                                  }
+                                  className="w-full rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 p-2.5 text-xs"
+                                />
+                              </div>
+
+                              <button
+                                type="button"
+                                onClick={() => handleSendTicketToProfessor(msg)}
+                                className="w-full min-h-[44px] rounded-xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold text-xs py-2.5 px-4 transition-colors"
+                              >
+                                Enviar al profesor
+                              </button>
+                            </div>
+                          )}
+
+                          {/* Confirmation once ticket is sent */}
+                          {msg.isTicketDraft && msg.ticketSent && (
+                            <div className="mt-3 rounded-xl bg-[#DCFCE7] text-[#166534] p-3 text-xs font-bold space-y-1">
+                              <p>
+                                ✓ Ticket enviado al profesor ({msg.escalatedTo}
+                                ).
+                              </p>
+                              <p className="font-normal">
+                                Puedes seguir usando el chat mientras esperas.
+                                Revisa el estado abajo en la línea de tiempo.
+                              </p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+
+                  {/* Micro-interaction: "escribiendo..." animation */}
+                  {askingGemma && (
+                    <div className="inline-flex items-center gap-2 rounded-2xl bg-[#CCFBF1] text-[#115E59] px-4 py-2.5 text-xs font-bold animate-pulse">
+                      <span>Asistente IA escribiendo…</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Seguimiento del Ticket: Línea de tiempo de 3 estados (STYLES.md §1 & §4.2) */}
+                {studentTickets.length > 0 && (
+                  <div className="mb-4 rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                        Seguimiento de tus tickets ({studentTickets.length})
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setAppView("profesor");
+                          setProfesorNav("bandeja");
+                        }}
+                        className="text-xs font-bold text-[#4F46E5] hover:underline"
+                      >
+                        Ver en bandeja del profesor →
+                      </button>
+                    </div>
+
+                    {studentTickets.slice(0, 2).map((tk) => (
+                      <div
+                        key={tk.id}
+                        className="rounded-xl bg-[#F8FAFC] dark:bg-slate-950 p-3.5 border border-slate-200/80 dark:border-slate-800 space-y-2.5"
+                      >
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <p className="text-xs font-bold">{tk.question}</p>
+                          <span className="text-[11px] text-[#475569]">
+                            {tk.createdAt}
+                          </span>
+                        </div>
+
+                        {/* 3-State Timeline: Enviado -> En revisión -> Respondido */}
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-1.5 text-[11px] font-bold flex items-center gap-1.5">
+                            <span>📤</span>
+                            <span>1. Enviado</span>
+                          </div>
+
+                          <div
+                            className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold flex items-center gap-1.5 ${
+                              tk.step === "en_revision" ||
+                              tk.step === "respondido"
+                                ? "bg-[#FEF3C7] text-[#92400E]"
+                                : "bg-slate-100 dark:bg-slate-900 text-slate-400"
+                            }`}
+                          >
+                            <span>🕒</span>
+                            <span>2. En revisión</span>
+                          </div>
+
+                          <div
+                            className={`rounded-lg px-2.5 py-1.5 text-[11px] font-bold flex items-center gap-1.5 ${
+                              tk.step === "respondido"
+                                ? "bg-[#DCFCE7] text-[#166534]"
+                                : "bg-slate-100 dark:bg-slate-900 text-slate-400"
+                            }`}
+                          >
+                            <span>✓</span>
+                            <span>3. Respondido</span>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Suggestion Chips (STYLES.md §1 & §4.1) */}
+                <div className="flex flex-wrap gap-2 mb-3">
+                  {[
+                    "¿Cuándo es el próximo parcial?",
+                    "¿Qué entra en el examen?",
+                    "¿Cómo se califica?",
+                    "¿Se permite calculadora gráfica en el segundo parcial?",
+                  ].map((chip) => (
+                    <button
+                      key={chip}
+                      type="button"
+                      onClick={() => askQuestionInChat(chip)}
+                      className="min-h-[40px] rounded-full bg-[#EEF2FF] dark:bg-slate-800 text-[#3730A3] dark:text-indigo-200 hover:bg-indigo-100 px-3.5 py-1.5 text-xs font-bold transition-colors"
+                    >
+                      {chip}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Chat Input Bar */}
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    askQuestionInChat(question);
+                  }}
+                  className="flex gap-2.5"
+                >
                   <input
                     type="text"
                     required
-                    placeholder="Ej: SOFT-101"
-                    value={studentCodeInput}
-                    onChange={(e) =>
-                      setStudentCodeInput(e.target.value.toUpperCase())
-                    }
-                    className="w-full rounded border border-zinc-300 px-3 py-2 text-sm font-mono uppercase"
+                    placeholder={`Escribe tu duda de ${
+                      connectedTeacher?.course || currentSubject.name
+                    }...`}
+                    value={question}
+                    onChange={(e) => setQuestion(e.target.value)}
+                    className="flex-1 min-h-[48px] rounded-2xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-3 text-sm focus:border-[#4F46E5] focus:outline-none"
                   />
-                </div>
-                <button
-                  type="submit"
-                  disabled={connectingCode}
-                  className="rounded bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
+                  <button
+                    type="submit"
+                    disabled={askingGemma}
+                    className="min-h-[48px] rounded-2xl bg-[#4F46E5] hover:bg-[#4338CA] text-white font-bold px-6 py-3 text-sm transition-colors disabled:opacity-50"
+                  >
+                    Preguntar
+                  </button>
+                </form>
+              </div>
+
+              {/* Collapsible Student Right Panel: Calendario, Syllabus & Material (STYLES.md §1 & §5) */}
+              {studentSidebarOpen && (
+                <aside
+                  aria-label="Contexto de la asignatura"
+                  className="w-full lg:w-[340px] shrink-0 border-t lg:border-t-0 lg:border-l border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-5 space-y-6 overflow-y-auto"
                 >
-                  {connectingCode
-                    ? "Verificando código..."
-                    : "Conectar al Chatbot del Docente"}
-                </button>
-              </form>
-
-              {studentConnectError && (
-                <div className="mb-4 rounded border border-red-300 bg-red-50 p-3 text-sm text-red-800">
-                  {studentConnectError}
-                </div>
-              )}
-
-              {connectedTeacher && (
-                <>
-                  <div className="mb-4 rounded border border-emerald-300 bg-emerald-50 p-3 text-sm text-emerald-950 flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      Conectado al chatbot de:{" "}
-                      <strong>{connectedTeacher.name}</strong> — Curso:{" "}
-                      <strong>{connectedTeacher.course}</strong> (Código:{" "}
-                      <code className="font-mono font-bold">
-                        {connectedTeacher.accessCode}
-                      </code>
-                      )
-                    </div>
-                    <span className="text-xs font-semibold bg-white px-2.5 py-1 rounded border border-emerald-200">
-                      {connectedTeacher.contentsCount} contenidos cargados en
-                      Neon
-                    </span>
-                  </div>
-
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 mb-4">
-                    <div>
-                      <label className="block text-xs font-semibold mb-1">
-                        Tu Nombre
-                      </label>
-                      <input
-                        type="text"
-                        required
-                        placeholder="Ej: Ana Pérez"
-                        value={studentName}
-                        onChange={(e) => setStudentName(e.target.value)}
-                        className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs font-semibold mb-1">
-                        Tu Correo (para que el docente te responda si Gemma 4 no
-                        sabe)
-                      </label>
-                      <input
-                        type="email"
-                        required
-                        placeholder="estudiante@institucion.edu"
-                        value={studentEmail}
-                        onChange={(e) => setStudentEmail(e.target.value)}
-                        className="w-full rounded border border-zinc-300 px-3 py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Ventana de Chat */}
-                  <div className="rounded border border-zinc-300 bg-zinc-50 p-4 h-96 overflow-y-auto space-y-3 mb-4">
-                    {chatHistory.length === 0 ? (
-                      <p className="text-sm text-zinc-500 text-center mt-32">
-                        Haz tu consulta para{" "}
-                        <strong>{connectedTeacher.course}</strong> (
-                        {connectedTeacher.name}). Gemma 4 responderá con base en
-                        los contenidos cargados en Neon Postgres.
-                      </p>
-                    ) : (
-                      chatHistory.map((m) => (
-                        <div
-                          key={m.id}
-                          className={`flex flex-col ${
-                            m.sender === "student"
-                              ? "items-end"
-                              : "items-start"
-                          }`}
-                        >
-                          <div
-                            className={`max-w-xl rounded p-3 text-sm ${
-                              m.sender === "student"
-                                ? "bg-zinc-900 text-white"
-                                : m.answered
-                                  ? "bg-white border border-zinc-300 text-zinc-900"
-                                  : "bg-amber-50 border border-amber-300 text-amber-950"
-                            }`}
-                          >
-                            <p className="whitespace-pre-wrap">{m.text}</p>
-
-                            {m.sender === "bot" && m.escalatedTo && (
-                              <div className="mt-2 border-t border-amber-200 pt-1.5 text-xs">
-                                <strong>Alerta Resend al docente:</strong>{" "}
-                                {m.escalatedTo}{" "}
-                                {m.emailSent
-                                  ? `(Correo enviado vía Resend - ID: ${m.emailId})`
-                                  : `(${m.emailError || "Registrado en bandeja del docente"})`}
-                              </div>
-                            )}
-                          </div>
+                  {/* Próximas entregas (Red used ONLY for critical deadline) */}
+                  <div className="space-y-2.5">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                      Calendario de entregas
+                    </h3>
+                    {currentSubject.deadlines.map((dl) => (
+                      <div
+                        key={dl.id}
+                        className={`rounded-xl p-3 text-xs space-y-1 ${
+                          dl.critical
+                            ? "bg-[#FEE2E2] text-[#991B1B]"
+                            : "bg-[#F8FAFC] dark:bg-slate-950 text-[#1E293B] dark:text-slate-200 border border-slate-200 dark:border-slate-800"
+                        }`}
+                      >
+                        <div className="font-bold flex items-center gap-1.5">
+                          {dl.critical && <span>⚠ Crítico:</span>}
+                          <span>{dl.title}</span>
                         </div>
-                      ))
-                    )}
-                    {askingGemma && (
-                      <div className="text-xs text-zinc-500 italic">
-                        Consultando a Gemma 4 (Ollama) con los contenidos de{" "}
-                        {connectedTeacher.name}...
+                        <p className="opacity-90 font-medium">{dl.date}</p>
                       </div>
-                    )}
+                    ))}
                   </div>
 
-                  <form onSubmit={handleSendQuestion} className="flex gap-2">
-                    <input
-                      type="text"
-                      required
-                      placeholder="Escribe tu pregunta para Gemma 4..."
-                      value={question}
-                      onChange={(e) => setQuestion(e.target.value)}
-                      className="flex-1 rounded border border-zinc-300 px-3 py-2 text-sm"
-                    />
-                    <button
-                      type="submit"
-                      disabled={askingGemma}
-                      className="rounded bg-zinc-900 px-5 py-2 text-sm font-semibold text-white hover:bg-zinc-800 disabled:opacity-50"
-                    >
-                      Preguntar a Gemma 4
-                    </button>
-                  </form>
-                </>
+                  {/* Fragmentos del Syllabus */}
+                  <div className="space-y-2.5">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                      Syllabus interactivo
+                    </h3>
+                    {currentSubject.syllabusSections.map((sec) => (
+                      <div
+                        key={sec.id}
+                        className="rounded-xl border border-slate-200 dark:border-slate-800 bg-[#F8FAFC] dark:bg-slate-950 p-3 space-y-1"
+                      >
+                        <span className="inline-block rounded bg-[#CCFBF1] text-[#115E59] px-2 py-0.5 text-[11px] font-bold">
+                          {sec.section}
+                        </span>
+                        <p className="text-xs font-bold">{sec.title}</p>
+                        <p className="text-[11.5px] text-[#475569] dark:text-slate-400 leading-relaxed">
+                          {sec.snippet}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Material descargable */}
+                  <div className="space-y-2">
+                    <h3 className="text-xs font-extrabold uppercase tracking-wider text-[#475569] dark:text-slate-400">
+                      Material del curso
+                    </h3>
+                    {currentSubject.materials.map((mat) => (
+                      <div
+                        key={mat.id}
+                        className="rounded-xl border border-slate-200 dark:border-slate-800 px-3.5 py-2.5 flex items-center justify-between text-xs"
+                      >
+                        <span className="font-medium">{mat.title}</span>
+                        <span className="rounded bg-[#EEF2FF] text-[#3730A3] px-2 py-0.5 font-bold">
+                          {mat.type}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </aside>
               )}
             </div>
-          </section>
+          </div>
         )}
-      </div>
+
+        {/* =====================================================================
+            5. VISTA ADMIN: APROBACIÓN DE DOCENTES Y REGISTRO RESEND
+           ===================================================================== */}
+        {appView === "admin" && (
+          <div className="max-w-[1100px] mx-auto px-5 py-7 md:px-9 md:py-8 space-y-6">
+            <header className="flex items-center justify-between">
+              <div>
+                <h1 className="text-[28px] leading-tight font-bold">
+                  Administración de docentes y alertas
+                </h1>
+                <p className="text-sm text-[#475569] dark:text-slate-400">
+                  Aprueba solicitudes de acceso docente en Neon Postgres y
+                  supervisa las notificaciones enviadas con Resend.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => fetchAllData()}
+                className="min-h-[44px] rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-900 px-4 py-2 text-xs font-bold"
+              >
+                {loadingData ? "Actualizando..." : "Refrescar datos"}
+              </button>
+            </header>
+
+            <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-6">
+              <h2 className="text-base font-bold mb-4">
+                Solicitudes de docentes ({teachers.length})
+              </h2>
+
+              {teachers.length === 0 ? (
+                <p className="text-sm text-[#475569] py-4">
+                  No hay docentes registrados todavía. Puedes registrar uno en{" "}
+                  <strong>Base de conocimiento</strong>.
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-sm border-collapse">
+                    <thead>
+                      <tr className="border-b border-slate-200 dark:border-slate-800 text-xs font-extrabold uppercase text-[#475569]">
+                        <th className="p-3">Docente</th>
+                        <th className="p-3">Correo</th>
+                        <th className="p-3">Asignatura</th>
+                        <th className="p-3">Código</th>
+                        <th className="p-3">Estado</th>
+                        <th className="p-3">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {teachers.map((t) => (
+                        <tr
+                          key={t.id}
+                          className="border-b border-slate-200 dark:border-slate-800"
+                        >
+                          <td className="p-3 font-bold">{t.name}</td>
+                          <td className="p-3">{t.email}</td>
+                          <td className="p-3">{t.course}</td>
+                          <td className="p-3">
+                            <code className="rounded-lg bg-[#EEF2FF] text-[#3730A3] px-2.5 py-1 font-mono text-xs font-bold">
+                              {t.accessCode}
+                            </code>
+                          </td>
+                          <td className="p-3">
+                            {t.status === "pending" && (
+                              <span className="rounded-full bg-[#FEF3C7] text-[#92400E] px-2.5 py-1 text-xs font-bold">
+                                🕒 Pendiente
+                              </span>
+                            )}
+                            {t.status === "approved" && (
+                              <span className="rounded-full bg-[#DCFCE7] text-[#166534] px-2.5 py-1 text-xs font-bold">
+                                ✓ Aceptado
+                              </span>
+                            )}
+                            {t.status === "rejected" && (
+                              <span className="rounded-full bg-[#FEE2E2] text-[#991B1B] px-2.5 py-1 text-xs font-bold">
+                                ⚠ Rechazado
+                              </span>
+                            )}
+                          </td>
+                          <td className="p-3 space-x-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateTeacherStatus(t.id, "approved")
+                              }
+                              disabled={t.status === "approved"}
+                              className="min-h-[38px] rounded-xl bg-[#22C55E] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+                            >
+                              Aceptar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleUpdateTeacherStatus(t.id, "rejected")
+                              }
+                              disabled={t.status === "rejected"}
+                              className="min-h-[38px] rounded-xl bg-[#EF4444] text-white px-3 py-1.5 text-xs font-bold disabled:opacity-40"
+                            >
+                              Rechazar
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+      </main>
     </div>
   );
 }

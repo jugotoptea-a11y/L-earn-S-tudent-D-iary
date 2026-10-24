@@ -4,6 +4,7 @@ import {
   getDb,
   getTeacherByCode,
   loginOrRequestTeacher,
+  resolveEscalationRecords,
   updateTeacherStatus,
   type TeacherStatus,
 } from "@/src/knowledge/db";
@@ -163,6 +164,46 @@ export async function PATCH(request: NextRequest) {
             : "Error actualizando estado del docente.",
       },
       { status: 400 }
+    );
+  }
+}
+
+export async function PUT(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const escalationIds = Array.isArray(body.escalationIds)
+      ? body.escalationIds.map(String)
+      : [];
+    const teacherId = body.teacherId ? String(body.teacherId).trim() : undefined;
+    const question = String(body.question ?? "").trim();
+    const answer = String(body.answer ?? "").trim();
+    const addToKb = Boolean(body.addToKb);
+
+    if (!answer) {
+      return NextResponse.json(
+        { error: "Escribe una respuesta para los estudiantes." },
+        { status: 400 }
+      );
+    }
+
+    const result = await resolveEscalationRecords({
+      escalationIds,
+      teacherId,
+      question,
+      answer,
+      addToKb,
+    });
+
+    return NextResponse.json(result);
+  } catch (err) {
+    return NextResponse.json(
+      {
+        error:
+          err instanceof Error
+            ? err.message
+            : "Error al responder el ticket.",
+      },
+      { status: 500 }
     );
   }
 }

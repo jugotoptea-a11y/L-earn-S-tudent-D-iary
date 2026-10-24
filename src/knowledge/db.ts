@@ -8,6 +8,8 @@ export type ContentCategory =
   | "Notas"
   | "Información general";
 
+export type EscalationStatus = "urgent" | "pending" | "resolved";
+
 export interface Teacher {
   id: string;
   name: string;
@@ -40,6 +42,9 @@ export interface EscalationRecord {
   emailSent: boolean;
   emailId?: string;
   emailError?: string;
+  status?: EscalationStatus;
+  teacherAnswer?: string;
+  addedToKb?: boolean;
   createdAt: string;
 }
 
@@ -110,8 +115,18 @@ export async function ensureSchema(): Promise<void> {
       email_sent BOOLEAN NOT NULL DEFAULT FALSE,
       email_id TEXT,
       email_error TEXT,
+      status TEXT NOT NULL DEFAULT 'pending',
+      teacher_answer TEXT,
+      added_to_kb BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
+  `;
+
+  await sql`
+    ALTER TABLE escalations
+    ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'pending',
+    ADD COLUMN IF NOT EXISTS teacher_answer TEXT,
+    ADD COLUMN IF NOT EXISTS added_to_kb BOOLEAN NOT NULL DEFAULT FALSE
   `;
 
   schemaInitialized = true;
@@ -149,6 +164,10 @@ function mapContentRow(row: Record<string, unknown>): CourseContent {
 }
 
 function mapEscalationRow(row: Record<string, unknown>): EscalationRecord {
+  const rawStatus = row.status ? String(row.status) : "pending";
+  const validStatus: EscalationStatus =
+    rawStatus === "urgent" || rawStatus === "resolved" ? rawStatus : "pending";
+
   return {
     id: String(row.id),
     teacherId: String(row.teacher_id),
@@ -160,6 +179,9 @@ function mapEscalationRow(row: Record<string, unknown>): EscalationRecord {
     emailSent: Boolean(row.email_sent),
     emailId: row.email_id ? String(row.email_id) : undefined,
     emailError: row.email_error ? String(row.email_error) : undefined,
+    status: validStatus,
+    teacherAnswer: row.teacher_answer ? String(row.teacher_answer) : undefined,
+    addedToKb: Boolean(row.added_to_kb),
     createdAt:
       row.created_at instanceof Date
         ? row.created_at.toISOString()
@@ -236,7 +258,7 @@ export async function loginOrRequestTeacher(params: {
     return mapTeacherRow(updatedRows[0]);
   }
 
-  const courseName = params.course?.trim() || "Curso General";
+  const courseName = params.course?.trim() || "Cálculo II";
   const teacherName = params.name?.trim() || normalizedEmail.split("@")[0];
   let accessCode =
     params.customCode?.trim().toUpperCase() || generateAccessCode(courseName);
@@ -400,10 +422,15 @@ export async function addEscalationRecord(
   await ensureSchema();
   const sql = getPooledSql();
 
+  const isUrgent = /parcial|examen|entrega|hoy|mañana|urgente|calificaci|nota/i.test(
+    record.question
+  );
+  const status: EscalationStatus = record.status || (isUrgent ? "urgent" : "pending");
+
   const id = `e_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
   const rows = await sql`
     INSERT INTO escalations (
-      id, teacher_id, teacher_name, teacher_email, student_name, student_email, question, email_sent, email_id, email_error
+      id, teacher_id, teacher_name, teacher_email, student_name, student_email, question, email_sent, email_id, email_error, status, teacher_answer, added_to_kb
     )
     VALUES (
       ${id},
@@ -415,10 +442,52 @@ export async function addEscalationRecord(
       ${record.question},
       ${record.emailSent},
       ${record.emailId ?? null},
-      ${record.emailError ?? null}
+      ${record.emailError ?? null},
+      ${status},
+      ${record.teacherAnswer ?? null},
+      ${Boolean(record.addedToKb)}
     )
     RETURNING *
   `;
 
   return mapEscalationRow(rows[0]);
+}
+
+export async function resolveEscalationRecords(params: {
+  escalationIds: string[];
+  teacherId?: string;
+  question: string;
+  answer: string;
+  addToKb: boolean;
+}): Promise<{ updatedCount: number; kbContent?: CourseContent }> {
+  await ensureSchema();
+  const sql = getPooledSql();
+
+  let updatedCount = 0;
+  for (const escId of params.escalationIds) {
+    const rows = await sql`
+      UPDATE escalations
+      SET status = 'resolved',
+          teacher_answer = ${params.answer.trim()},
+          added_to_kb = ${params.addToKb}
+      WHERE id = ${escId}
+      RETURNING id
+    `;
+    updatedCount += rows.length;
+  }
+
+  let kbContent: CourseContent | undefined;
+  if (params.addToKb && params.teacherId) {
+    const teacher = await getTeacherById(params.teacherId);
+    if (teacher && teacher.status === "approved") {
+      kbContent = await addCourseContent({
+        teacherId: teacher.id,
+        category: "Información general",
+        title: `Respuesta docente: ${params.question.slice(0, 80)}`,
+        content: `Pregunta frecuente de estudiantes: ${params.question}\nRespuesta oficial del profesor (${teacher.name}): ${params.answer.trim()}`,
+      });
+    }
+  }
+
+  return { updatedCount, kbContent };
 }

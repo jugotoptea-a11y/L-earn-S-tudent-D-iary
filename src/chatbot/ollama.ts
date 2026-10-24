@@ -10,6 +10,52 @@ export interface AskGemmaParams {
 export interface AskGemmaResult {
   known: boolean;
   answer: string;
+  source?: {
+    id: string;
+    category: string;
+    title: string;
+    snippet: string;
+  };
+  confidence?: "Basada en el syllabus" | "Respuesta inferida";
+}
+
+function findBestSource(
+  contents: CourseContent[],
+  question: string,
+  answer: string
+): AskGemmaResult["source"] {
+  if (!contents.length) return undefined;
+  const words = `${question} ${answer}`
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .split(/\W+/)
+    .filter((w) => w.length > 3);
+
+  let best = contents[0];
+  let bestScore = -1;
+
+  for (const item of contents) {
+    const haystack = `${item.title} ${item.category} ${item.content}`
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+    let score = 0;
+    for (const w of words) {
+      if (haystack.includes(w)) score += 1;
+    }
+    if (score > bestScore) {
+      bestScore = score;
+      best = item;
+    }
+  }
+
+  return {
+    id: best.id,
+    category: best.category,
+    title: best.title,
+    snippet: best.content,
+  };
 }
 
 export async function askGemmaWithContents(
@@ -64,8 +110,12 @@ ${formattedContents}`;
     };
   }
 
+  const source = findBestSource(contents, question, rawText);
+
   return {
     known: true,
     answer: rawText,
+    source,
+    confidence: "Basada en el syllabus",
   };
 }

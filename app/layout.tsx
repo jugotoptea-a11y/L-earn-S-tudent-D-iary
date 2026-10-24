@@ -13,18 +13,22 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Chatbot Estudiantil con IA (Gemma 4 + Ollama)",
+  title: "Learn Student Diary — Bandeja de tickets y Asistente Académico IA",
   description:
-    "Plataforma académica con perfiles de Admin, Docente y Estudiante conectada a Gemma 4 y Resend.",
+    "Aplicativo open source para estudiantes y profesores con IA (Gemma 4), Neon Postgres y Resend.",
 };
 
-export default function RootLayout({ children }: LayoutProps<"/">) {
+export default function RootLayout({
+  children,
+}: Readonly<{
+  children: React.ReactNode;
+}>) {
   return (
     <html
       lang="es"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-zinc-50 text-zinc-900">
+      <body className="min-h-full flex flex-col bg-[#F8FAFC] text-[#1E293B]">
         {children}
       </body>
     </html>

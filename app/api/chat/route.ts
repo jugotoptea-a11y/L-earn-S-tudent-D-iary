@@ -15,9 +15,12 @@ export async function POST(request: NextRequest) {
       .trim()
       .toUpperCase();
     const teacherId = String(body.teacherId ?? "").trim();
-    const studentName = String(body.studentName ?? "").trim();
-    const studentEmail = String(body.studentEmail ?? "").trim();
+    const studentName = String(body.studentName ?? "").trim() || "Estudiante";
+    const studentEmail =
+      String(body.studentEmail ?? "").trim() || "estudiante@curso.edu";
     const question = String(body.question ?? "").trim();
+    const action = String(body.action ?? "ask").trim();
+    const deferEscalation = Boolean(body.deferEscalation);
 
     const teacher = accessCode
       ? await getTeacherByCode(accessCode)
@@ -45,20 +48,46 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!studentName || !studentEmail || !studentEmail.includes("@")) {
-      return NextResponse.json(
-        {
-          error:
-            "Ingresa tu nombre y un correo válido por si debemos escalar tu consulta al docente.",
-        },
-        { status: 400 }
-      );
-    }
     if (!question) {
       return NextResponse.json(
         { error: "Escribe una pregunta para consultar." },
         { status: 400 }
       );
+    }
+
+    // Explicit ticket submission from the student's editable draft
+    if (action === "send_ticket") {
+      const emailResult = await sendEscalationEmailToTeacher({
+        teacherEmail: teacher.email,
+        teacherName: teacher.name,
+        courseName: teacher.course,
+        studentName,
+        studentEmail,
+        question,
+      });
+
+      const escalation = await addEscalationRecord({
+        teacherId: teacher.id,
+        teacherName: teacher.name,
+        teacherEmail: teacher.email,
+        studentName,
+        studentEmail,
+        question,
+        emailSent: emailResult.sent,
+        emailId: emailResult.emailId,
+        emailError: emailResult.error,
+      });
+
+      return NextResponse.json({
+        answered: false,
+        ticketCreated: true,
+        answer: "No encuentro esto en el material del curso.",
+        escalatedTo: teacher.email,
+        emailSent: emailResult.sent,
+        emailId: emailResult.emailId,
+        emailError: emailResult.error,
+        escalation,
+      });
     }
 
     const contents = await getContentsByTeacher(teacher.id);
@@ -72,6 +101,19 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         answered: true,
         answer: gemmaResult.answer,
+        source: gemmaResult.source,
+        confidence: gemmaResult.confidence ?? "Basada en el syllabus",
+      });
+    }
+
+    // If the UI wants to show the editable ticket draft first (STYLES.md §1)
+    if (deferEscalation) {
+      return NextResponse.json({
+        answered: false,
+        needsTicketConfirmation: true,
+        answer: "No encuentro esto en el material del curso.",
+        draftQuestion: question,
+        draftContext: `Asignatura: ${teacher.course} (${teacher.name}) · La consulta no aparece en el syllabus ni en los ${contents.length} materiales cargados.`,
       });
     }
 
@@ -99,7 +141,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       answered: false,
-      answer: `No encontré esa información en los contenidos cargados por el docente ${teacher.name} (${teacher.course}). He enviado automáticamente una alerta por correo con Resend a ${teacher.email} para que te responda directamente a ${studentEmail}.`,
+      answer: "No encuentro esto en el material del curso.",
       escalatedTo: teacher.email,
       emailSent: emailResult.sent,
       emailId: emailResult.emailId,
